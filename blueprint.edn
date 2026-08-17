@@ -1,0 +1,32 @@
+[{:itonami.blueprint/id "keihi"
+  :itonami.blueprint/name "経費 — Expense Reimbursement"
+  :itonami.blueprint/domain :finance/expense-reimbursement
+  :itonami.blueprint/license "AGPL-3.0-or-later"
+  :itonami.blueprint/social-impact [:small-business-support
+                                    :financial-transparency
+                                    :worker-reimbursement-fairness]
+  :itonami.blueprint/governor :keihi-governor
+  :itonami.blueprint/robotics false
+  :itonami.blueprint/required-technologies [:identity :forms :audit-ledger :taxlaw]
+  :itonami.blueprint/status :public-oss
+  :itonami.blueprint/maturity :implemented
+
+  ;; The statutes enforced here, and how each one was ESTABLISHED — which is a
+  ;; different fact from which ones are cited. A rule enforced on the strength
+  ;; of a URL nobody opened is not a cited rule.
+  :itonami.blueprint/statutes
+  [{:provision "消費税法 第三十条第七項"
+    :law/id "363AC0000000108"
+    :review :read-from-source
+    :retrieved-via "e-Gov law API v2 GET /api/2/law_data/363AC0000000108"
+    :retrieved-at "2026-08-17"
+    :held-by :keihi.shohizei}
+   {:provision "電子帳簿保存法 第七条"
+    :law/id "410AC0000000025"
+    :review :read-from-source
+    :retrieved-at "2026-08-17"
+    :held-by :kotoba-lang/taxlaw}
+   {:provision "適格請求書発行事業者の登録番号（形式）"
+    :review :read-from-source
+    :held-by :kotoba-lang/taxlaw}]
+  :db/id -1}]

@@ -1,0 +1,41 @@
+{:paths ["src"]
+ :deps {;; the langgraph StateGraph the actor is built as.
+        io.github.kotoba-lang/langgraph
+        {:git/url "https://github.com/kotoba-lang/langgraph.git"
+         :git/sha "5b4e5e70837b849b14b6a5800894e3be202ad5fa"}
+
+        ;; the itonami actor pattern's governor layer, written once — the four
+        ;; provenance rules and the verdict assembly every actor shares.
+        io.github.kotoba-lang/governor
+        {:git/url "https://github.com/kotoba-lang/governor.git"
+         :git/sha "90a2944e617e58b9c90314b7e84b003ec3ea0c1f"}
+
+        ;; what a tax record must carry, by jurisdiction.
+        io.github.kotoba-lang/taxlaw
+        {:git/url "https://github.com/kotoba-lang/taxlaw.git"
+         :git/sha "718b09ea4fd608dc3a12d0baaa095588046a2e5c"}}
+
+ ;; ---------------------------------------------------------------------------
+ ;; ZERO `:local/root`, and that is a hard property rather than a preference.
+ ;;
+ ;; A sibling path makes this repo unforkable (its README claims otherwise) and
+ ;; structurally ungateable on the murakumo fleet, which ships ONE repo's tree
+ ;; and no siblings — a gate would fail on a missing directory and read as a
+ ;; broken build rather than as a broken dependency declaration.
+ ;;
+ ;; Measured 2026-08-17: the suite below was run from /tmp/keihi, where no
+ ;; sibling checkout of governor, taxlaw or langgraph exists. That is the only
+ ;; check that actually proves the property; grepping this file does not,
+ ;; because a transitive `:local/root` in a dependency is just as fatal and
+ ;; does not appear here.
+ ;; ---------------------------------------------------------------------------
+
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps {io.github.cognitect-labs/test-runner
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+         :main-opts ["-m" "cognitect.test-runner"]
+         :exec-fn cognitect.test-runner.api/test}
+  :lint {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
+         :main-opts ["-m" "clj-kondo.main" "--lint" "src" "test"
+                     "--fail-level" "error"]}}}
