@@ -1,0 +1,435 @@
+;; One mutation per invariant. `:find` must occur EXACTLY ONCE in `:file` —
+;; `tools/mutate.cljs` refuses otherwise, because a mutation that landed in a
+;; comment or in a second call site produces a red suite that proves nothing.
+;;
+;; Read the pair before trusting a red: the thing broken and the thing
+;; reported must be the same thing.
+;;
+;; ## What this table covers, and what it does not
+;;
+;; COVERS: every rule in `keihi.governor` (the four fleet rules, the six
+;; 経費 ones, rule 11's unread arm, and both escalations), the three limit /
+;; retention helpers the taxlaw@d2663b54 bump made necessary, the jurisdiction
+;; gate in `keihi.shohizei`, the nil-scoping rules in `keihi.store`, the
+;; refusal statuses in `keihi.shiwake` and `keihi.handoff`, and the
+;; allow-list / scoping / dispatch decisions in `keihi.edge.endpoints`.
+;;
+;; DOES NOT COVER: `kotoba-lang/taxlaw`, `kotoba-lang/governor`,
+;; `langgraph` and `langchain-store` — mutating a dependency is that
+;; dependency's suite's job, and this table only ever edits files under
+;; `src/keihi/`. It also does not cover Japanese or English prose in
+;; `:detail` strings beyond the substrings that tests actually read, the
+;; DatomicStore's langchain.db wiring below the protocol, or the LLM advisor
+;; path (`llm-advisor` is exercised only through `parse-proposal`).
+;;
+;; It is single-token: each entry changes one decision. Mutations that break
+;; the reader rather than an invariant are reported UNMEASURED, not killed.
+[
+ ;; --------------------------------------------------------------------
+ ;; keihi.governor — the four rules that come from kotoba-lang/governor
+ ;; --------------------------------------------------------------------
+ {:id :no-employee
+  :invariant "an operation for an unregistered employee is refused"
+  :file "src/keihi/governor.cljc"
+  :find "(gov/missing-subject employee-record {:rule :no-employee"
+  :replace "(gov/missing-subject (or employee-record {}) {:rule :no-employee"}
+
+ {:id :no-actuation
+  :invariant "the advisor may only propose"
+  :file "src/keihi/governor.cljc"
+  :find "(gov/no-actuation proposal"
+  :replace "(gov/no-actuation {:effect :propose}"}
+
+ {:id :unknown-receipt
+  :invariant "a cited receipt must be registered"
+  :file "src/keihi/governor.cljc"
+  :find ":applies? (boolean (and claim? (:receipt proposal)))"
+  :replace ":applies? false"}
+
+ {:id :receipt-wrong-employee
+  :invariant "a receipt must belong to the claiming employee"
+  :file "src/keihi/governor.cljc"
+  :find "(gov/scope-owner-mismatch receipt-record request"
+  :replace "(gov/scope-owner-mismatch nil request"}
+
+ ;; --------------------------------------------------------------------
+ ;; keihi.governor — 経費's own structural rules
+ ;; --------------------------------------------------------------------
+ {:id :no-receipt
+  :invariant "a reimbursement claim citing no receipt is an invented expense"
+  :file "src/keihi/governor.cljc"
+  :find "(and claim? (nil? (:receipt proposal)))"
+  :replace "(and false (nil? (:receipt proposal)))"}
+
+ {:id :amount-mismatch
+  :invariant "the claimed total must equal the sum of the lines"
+  :file "src/keihi/governor.cljc"
+  :find "(and claim? (not= amount (lines-total lines)))"
+  :replace "(and claim? false)"}
+
+ {:id :amount-defaults-to-zero
+  :invariant "a claim with no total is not a coincidental 0 = 0 pass"
+  :file "src/keihi/governor.cljc"
+  :find "(not= amount (lines-total lines))"
+  :replace "(not= (or amount 0) (lines-total lines))"}
+
+ {:id :claim-ops-include-disburse
+  :invariant "the receipt rules are scoped to the ops that assert an expense"
+  :file "src/keihi/governor.cljc"
+  :find "#{:submit-claim :amend-claim})"
+  :replace "#{:submit-claim :amend-claim :disburse :reject-claim})"}
+
+ ;; --------------------------------------------------------------------
+ ;; keihi.governor — the statute-driven rules
+ ;; --------------------------------------------------------------------
+ {:id :unchecked-jurisdiction
+  :invariant "a credit claimed where no invoice rule was read is HELD"
+  :file "src/keihi/governor.cljc"
+  :find "(= :none (:taxlaw/coverage credit))"
+  :replace "(= :never (:taxlaw/coverage credit))"}
+
+ {:id :invalid-registration-number
+  :invariant "a receipt without a registration number is not creditable"
+  :file "src/keihi/governor.cljc"
+  :find "(false? (:taxlaw/supported? credit)))"
+  :replace "(nil? (:taxlaw/supported? credit)))"}
+
+ {:id :electronic-record-not-preserved
+  :invariant "電子帳簿保存法 第七条 — an 電子取引 kept only on paper is HELD"
+  :file "src/keihi/governor.cljc"
+  :find "(false? (:taxlaw/preserved? preservation)))"
+  :replace "(nil? (:taxlaw/preserved? preservation)))"}
+
+ {:id :invoice-not-preserved
+  :invariant "消費税法 第三十条第七項 — an unpreserved 請求書等 refuses the credit"
+  :file "src/keihi/governor.cljc"
+  :find "(false? (:keihi/preserved? invoice-preservation))"
+  :replace "(nil? (:keihi/preserved? invoice-preservation))"}
+
+ {:id :proviso-does-not-swallow-the-rule
+  :invariant "the ただし書 excludes rule 10 only for the claim that asserts it"
+  :file "src/keihi/governor.cljc"
+  :find "(not (:keihi/exception-asserted? invoice-preservation))"
+  :replace "(not false)"}
+
+ {:id :rule-11-unread-precondition
+  :invariant "a credit claimed where the preservation rule was never READ is HELD"
+  :file "src/keihi/governor.cljc"
+  :find "(= :none (:keihi/coverage invoice-preservation))"
+  :replace "(= :never (:keihi/coverage invoice-preservation))"}
+
+ {:id :rule-11-does-not-swallow-rule-10
+  :invariant "unread and read-but-failed are different holds"
+  :file "src/keihi/governor.cljc"
+  :find "       (= :none (:keihi/coverage invoice-preservation))\n       (conj {:rule :invoice-preservation-unread"
+  :replace "       (contains? #{:none :checked} (:keihi/coverage invoice-preservation))\n       (conj {:rule :invoice-preservation-unread"}
+
+ {:id :rule-7-detail-states-taxlaws-reason
+  :invariant "a US hold says there is no federal VAT, not that the catalog is silent"
+  :file "src/keihi/governor.cljc"
+  :find "(if-let [why (:taxlaw/why credit)]"
+  :replace "(if-let [why nil]"}
+
+ ;; --------------------------------------------------------------------
+ ;; keihi.governor — escalation
+ ;; --------------------------------------------------------------------
+ {:id :escalate-disburse
+  :invariant "real money leaving the company is never an unattended commit"
+  :file "src/keihi/governor.cljc"
+  :find "  #{:disburse})"
+  :replace "  #{})"}
+
+ {:id :escalate-exception-only-when-reached
+  :invariant "asserting a disaster where the article was never read invents no escalation"
+  :file "src/keihi/governor.cljc"
+  :find "(boolean (:keihi/exception-asserted? (:invoice-preservation tax))))"
+  :replace "(boolean (:preservation-exception (:invoice-preservation tax))))"}
+
+ {:id :confidence-floor
+  :invariant "a proposal below the floor escalates"
+  :file "src/keihi/governor.cljc"
+  :find "  0.6)"
+  :replace "  0.0)"}
+
+ {:id :jurisdiction-is-the-employees
+  :invariant "an advisor cannot pick the jurisdiction whose rules it satisfies"
+  :file "src/keihi/governor.cljc"
+  :find "jurisdiction (:jurisdiction employee-record)"
+  :replace "jurisdiction (or (:jurisdiction proposal) (:jurisdiction employee-record))"}
+
+ {:id :tax-report-needs-a-receipt
+  :invariant "nothing is assessed when no receipt was read"
+  :file "src/keihi/governor.cljc"
+  :find "(when (and claim? receipt-record)"
+  :replace "(when (and claim? true)"}
+
+ ;; --------------------------------------------------------------------
+ ;; keihi.governor — the limits and the retention answer
+ ;; --------------------------------------------------------------------
+ {:id :registration-format-caveat
+  :invariant "an EU prefix-only check is not reported as a valid VAT number"
+  :file "src/keihi/governor.cljc"
+  :find "    (when (seq not-checked)"
+  :replace "    (when (seq nil)"}
+
+ {:id :registration-caveat-is-not-blanket
+  :invariant "the caveat names what was unchecked; it is not applied everywhere"
+  :file "src/keihi/governor.cljc"
+  :find "       :keihi/not-checked (vec (sort not-checked))"
+  :replace "       :keihi/not-checked []"}
+
+ {:id :electronic-preservation-limit
+  :invariant "an unread preservation rule is stated, not left as silence"
+  :file "src/keihi/governor.cljc"
+  :find "  (when (= :none (:taxlaw/coverage preservation))"
+  :replace "  (when (= :never (:taxlaw/coverage preservation))"}
+
+ {:id :electronic-limit-carries-taxlaws-reason
+  :invariant "the limit says WHY the Directive is silent, not merely that it is"
+  :file "src/keihi/governor.cljc"
+  :find "     :keihi/why (or (:taxlaw/why preservation)"
+  :replace "     :keihi/why (or nil"}
+
+ {:id :retention-unread-vs-no-period
+  :invariant "nil years because nobody read is not nil years because the text says none"
+  :file "src/keihi/governor.cljc"
+  :find "      (nil? facet)\n      {:keihi/retention :unread"
+  :replace "      (nil? facet)\n      {:keihi/retention :no-period"}
+
+ {:id :retention-period-set-by
+  :invariant "who sets the period is the actionable half of a nil"
+  :file "src/keihi/governor.cljc"
+  :find "       :keihi/period-set-by (:rule/period-set-by facet)"
+  :replace "       :keihi/period-set-by nil"}
+
+ {:id :retention-years-are-qualified
+  :invariant "Japan's 7 is never handed over as a bare number"
+  :file "src/keihi/governor.cljc"
+  :find "       :keihi/years-with-loss-carryforward (:rule/years-with-loss-carryforward facet)"
+  :replace "       :keihi/years-with-loss-carryforward nil"}
+
+ {:id :retention-binds
+  :invariant "第五十九条 binds 青色申告法人 and not every company"
+  :file "src/keihi/governor.cljc"
+  :find "       :keihi/binds (:rule/binds facet)"
+  :replace "       :keihi/binds nil"}
+
+ {:id :limits-ride-on-the-verdict
+  :invariant "what could not be asked survives onto the verdict"
+  :file "src/keihi/governor.cljc"
+  :find "       :limits (tax-limits credit preservation)"
+  :replace "       :limits []"}
+
+ {:id :retention-rides-on-the-verdict
+  :invariant "the retention answer survives onto the verdict"
+  :file "src/keihi/governor.cljc"
+  :find "       :retention (retention-answer jurisdiction)"
+  :replace "       :retention nil"}
+
+ ;; --------------------------------------------------------------------
+ ;; keihi.shohizei — 消費税法 第三十条第七項
+ ;; --------------------------------------------------------------------
+ {:id :read-jurisdictions-is-jp-only
+  :invariant "taxlaw catalogueing a jurisdiction must not switch 消費税法 on for it"
+  :file "src/keihi/shohizei.cljc"
+  :find "  #{[:jp]})"
+  :replace "  #{[:jp] [:eu] [:us]})"}
+
+ {:id :article-30-is-scoped-to-the-claim
+  :invariant "a claim seeking no credit raises no question under 第三十条"
+  :file "src/keihi/shohizei.cljc"
+  :find "      (not= :input-tax-credit (:tax-treatment claim))"
+  :replace "      (= :never (:tax-treatment claim))"}
+
+ {:id :preservation-none-is-not-kept
+  :invariant "a document recorded as gone is not preserved"
+  :file "src/keihi/shohizei.cljc"
+  :find "kept? (contains? #{:electronic :paper} pres)"
+  :replace "kept? (contains? #{:electronic :paper :none} pres)"}
+
+ {:id :unrecorded-preservation-refuses
+  :invariant "the 本文 puts the burden of proof on the business"
+  :file "src/keihi/shohizei.cljc"
+  :find "        :keihi/preserved? kept?"
+  :replace "        :keihi/preserved? (or kept? (nil? pres))"}
+
+ ;; --------------------------------------------------------------------
+ ;; keihi.store — nil scoping
+ ;; --------------------------------------------------------------------
+ {:id :claim-history-nil-is-not-everything
+  :invariant "a lookup for nothing must not become a lookup for everything"
+  :file "src/keihi/store.cljc"
+  :find "  (when (some? claim-id)\n    (filterv"
+  :replace "  (when true\n    (filterv"}
+
+ {:id :ledger-of-nil-is-not-everything
+  :invariant "one employee must not read the whole company's spending"
+  :file "src/keihi/store.cljc"
+  :find "  (when (some? employee-id)\n    (filterv"
+  :replace "  (when true\n    (filterv"}
+
+ {:id :records-are-scoped-to-their-employee
+  :invariant "records-of returns one employee's records"
+  :file "src/keihi/store.cljc"
+  :find "  (records-of [_ employee-id] (filter #(= employee-id (:employee-id %)) (:records @a)))"
+  :replace "  (records-of [_ employee-id] (filter (fn [_] true) (:records @a)))"}
+
+ ;; --------------------------------------------------------------------
+ ;; keihi.actor — routing and the ledger
+ ;; --------------------------------------------------------------------
+ {:id :hard-is-tested-first
+  :invariant "a malformed verdict still fails closed"
+  :file "src/keihi/actor.cljc"
+  :find "    (:hard? verdict) :hold\n    (:escalate? verdict) :request-approval"
+  :replace "    (:escalate? verdict) :request-approval\n    (:hard? verdict) :hold"}
+
+ {:id :every-disposition-is-identified
+  :invariant "a held claim is findable by the id somebody will look it up under"
+  :file "src/keihi/actor.cljc"
+  :find "  (assoc fact\n         :claim-id (:claim-id request)"
+  :replace "  (assoc fact\n         :claim-id nil"}
+
+ ;; --------------------------------------------------------------------
+ ;; keihi.shiwake — the journal-entry hand-off
+ ;; --------------------------------------------------------------------
+ {:id :not-approved-is-its-own-status
+  :invariant "a held claim must not convert to a journal entry"
+  :file "src/keihi/shiwake.cljc"
+  :find "      (not= :commit disposition)"
+  :replace "      (= :never disposition)"}
+
+ {:id :partial-mapping-is-refused
+  :invariant "a journal entry missing one line balances by having lost it"
+  :file "src/keihi/shiwake.cljc"
+  :find "      (or (str/blank? (str debit)) (str/blank? (str credit)))"
+  :replace "      (and (str/blank? (str debit)) (str/blank? (str credit)))"}
+
+ {:id :batch-keeps-its-refusals
+  :invariant "a batch that dropped what it could not convert reports a clean run"
+  :file "src/keihi/shiwake.cljc"
+  :find "     :skipped (vec (remove #(= :ok (:shiwake/status %)) rs))"
+  :replace "     :skipped []"}
+
+ ;; --------------------------------------------------------------------
+ ;; keihi.handoff — what 4311 said
+ ;; --------------------------------------------------------------------
+ {:id :duplicate-is-not-posted
+  :invariant "`I wrote this` and `this was already there` are different facts"
+  :file "src/keihi/handoff.cljc"
+  :find "    (and (= 200 status) (true? (:duplicate? body))) :duplicate"
+  :replace "    (and (= 200 status) (true? (:never body))) :duplicate"}
+
+ {:id :unknown-response-never-defaults-to-posted
+  :invariant "defaulting the unrecognised case to success reports a clean run"
+  :file "src/keihi/handoff.cljc"
+  :find "    :else :unknown-response))"
+  :replace "    :else :posted))"}
+
+ {:id :length-mismatch-yields-no-facts
+  :invariant "pairing a positional mismatch misattributes every outcome"
+  :file "src/keihi/handoff.cljc"
+  :find "  (if (not= (count requests) (count results))"
+  :replace "  (if (= :never requests)"}
+
+ {:id :unresolved-is-everything-else
+  :invariant "the operator's queue is exactly what is not posted or duplicate"
+  :file "src/keihi/handoff.cljc"
+  :find "  (vec (remove #(#{:posted :duplicate} (:handoff/outcome %)) fs)))"
+  :replace "  (vec (remove #(#{:posted :duplicate :held} (:handoff/outcome %)) fs)))"}
+
+ ;; --------------------------------------------------------------------
+ ;; keihi.edge.endpoints — the three gates and the dispatcher
+ ;; --------------------------------------------------------------------
+ {:id :absent-allowlist-is-503-not-open
+  :invariant "an absent allow-list serves 503, never an open endpoint"
+  :file "src/keihi/edge/endpoints.cljc"
+  :find "    (nil? allowlist)\n    {:status 503 :body {:ok false :error \"no allow-list configured\"}}\n\n    (nil? (employee-for allowlist caller-did))\n    {:status 403 :body {:ok false :error \"caller not permitted\"}}\n\n    :else\n    (if-let [body (parse-claim-body raw-body)]"
+  :replace "    (nil? (employee-for allowlist caller-did))\n    {:status 403 :body {:ok false :error \"caller not permitted\"}}\n\n    :else\n    (if-let [body (parse-claim-body raw-body)]"}
+
+ ;; REMOVED 2026-08-18 — two mutations, both semantic no-ops, and the reason
+ ;; is recorded here rather than by deleting them silently:
+ ;;
+ ;;   :the-op-is-not-read-from-the-body
+ ;;     `:op :submit-claim` -> `:op (or (:op body) :submit-claim)`
+ ;;   :the-employee-comes-from-the-did
+ ;;     `employee-id (employee-for …)` -> `(or (:employee-id body) …)`
+ ;;
+ ;; Both SURVIVED, and neither is a test gap. `parse-claim-body` returns
+ ;; `(select-keys m [:claim-id :receipt :amount :lines :tax-treatment
+ ;; :preservation-exception :stake])`, so `:op` and `:employee-id` have
+ ;; already been stripped one layer up and `(:op body)` is nil no matter what
+ ;; the caller sent. The property IS asserted end to end, by
+ ;; `the-body-cannot-choose-the-op-and-so-cannot-reach-the-money` and
+ ;; `the-employee-comes-from-the-did-not-the-body` in
+ ;; `keihi.edge.endpoints-test`, and it is defended TWICE — by the key
+ ;; allow-list and by the hard-coded assoc — so no single-token mutation of
+ ;; either can kill it. That is defence in depth, not silence.
+ ;;
+ ;; What WAS unmeasured is the allow-list itself, which nothing pinned. This
+ ;; mutation replaces both and is killable:
+ {:id :parse-claim-body-strips-unknown-keys
+  :invariant "the body's key allow-list is the boundary, not a formality"
+  :file "src/keihi/edge/endpoints.cljc"
+  :find "        (select-keys m [:claim-id :receipt :amount :lines :tax-treatment\n                        :preservation-exception :stake])))"
+  :replace "        m))"}
+
+ {:id :another-employees-claim-is-404
+  :invariant "knowing a claim id is not enough to read someone else's claim"
+  :file "src/keihi/edge/endpoints.cljc"
+  :find "          history (filterv #(= employee-id (:employee-id %))\n                           (store/claim-history store claim-id))"
+  :replace "          history (vec (store/claim-history store claim-id))"}
+
+ {:id :unknown-claim-is-not-an-empty-200
+  :invariant "`no entries` and `no such claim` are the same bytes as a list"
+  :file "src/keihi/edge/endpoints.cljc"
+  :find "      (if (empty? history)"
+  :replace "      (if (= :never history)"}
+
+ {:id :claim-id-is-required
+  :invariant "this actor will not mint an identity on the caller's behalf"
+  :file "src/keihi/edge/endpoints.cljc"
+  :find "                 (string? (:claim-id m)) (seq (.trim (:claim-id m)))"
+  :replace "                 (or true (string? (:claim-id m)))"}
+
+ {:id :line-amounts-are-numbers
+  :invariant "a line carrying a string throws inside the graph"
+  :file "src/keihi/edge/endpoints.cljc"
+  :find "                          (every? (comp money? :amount) (:lines m))"
+  :replace "                          (every? (fn [_] true) (:lines m))"}
+
+ {:id :store-mode-typo-selects-nothing
+  :invariant "a typo in a deployment variable must not select a storage mode"
+  :file "src/keihi/edge/endpoints.cljc"
+  :find "    \"datomic\" :datomic\n    nil))"
+  :replace "    \"datomic\" :datomic\n    :ephemeral))"}
+
+ {:id :blank-allowlist-is-nil-not-empty
+  :invariant "`nobody is allowed` and `nothing configured` are different states"
+  :file "src/keihi/edge/endpoints.cljc"
+  :find "      (when (seq pairs) (into {} pairs)))))"
+  :replace "      (into {} pairs))))"}
+
+ {:id :handoff-cap
+  :invariant "an uncapped body holds this actor for an unbounded time"
+  :file "src/keihi/edge/endpoints.cljc"
+  :find "        (> (count pairs) max-handoffs)"
+  :replace "        (> (count pairs) 1000000)"}
+
+ {:id :wrong-verb-is-405-not-404
+  :invariant "a wrong verb on a real route is not an invented route"
+  :file "src/keihi/edge/endpoints.cljc"
+  :find "        {:status 405 :body {:ok false :error \"method not allowed\" :allow [:get]}})\n\n      (and (string? path)"
+  :replace "        {:status 404 :body {:ok false :error \"no such route\"}})\n\n      (and (string? path)"}
+
+ {:id :tax-coverage-carries-the-limits
+  :invariant "one keyword per statute cannot distinguish checked from all-we-could-check"
+  :file "src/keihi/edge/endpoints.cljc"
+  :find "     :limits (vec (:limits tax))"
+  :replace "     :limits []"}
+
+ {:id :tax-coverage-carries-the-retention-answer
+  :invariant "the surface must not invent a number of years either"
+  :file "src/keihi/edge/endpoints.cljc"
+  :find "     :retention (:retention tax)"
+  :replace "     :retention nil"}
+]

@@ -250,10 +250,17 @@
                                                       :keihi/coverage])
                      :rules (mapv :rule (get-in entry [:verdict :violations]))})))]
       (is (= (run store/mem-store) (run store/datomic-store)))
+      ;; Two rules, not one, since taxlaw@d2663b54. `:atlantis` fails BOTH
+      ;; unread preconditions of the credit — no invoice rule was read (7)
+      ;; and no 請求書等の保存 rule was read (11) — and before the bump those
+      ;; were inseparable, so only rule 7 existed to name them. Kept exact
+      ;; rather than relaxed to `contains?`: this assertion is what proves
+      ;; the violation VECTOR survives the blob codec in order, which is the
+      ;; whole subject of this test.
       (is (= {:disposition :hold
               :credit-coverage :none
               :invoice-coverage :none
-              :rules [:unchecked-jurisdiction]}
+              :rules [:unchecked-jurisdiction :invoice-preservation-unread]}
              (run store/datomic-store))))))
 
 (deftest the-backends-are-actually-two

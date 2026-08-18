@@ -13,6 +13,7 @@
   internally consistent, across the whole space of dispositions this actor
   has, and that the space is actually covered."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [keihi.store :as store]
             [keihi.governor :as governor]
             [governor.core :as gov]))
@@ -89,6 +90,34 @@
     :request {:employee-id "emp-1"}
     :proposal (base :tax-treatment :input-tax-credit)}
 
+   ;; --- non-JP, since taxlaw@d2663b54 ------------------------------------
+   ;; The three shapes the EU and US can produce. Included here rather than
+   ;; only in `keihi.non-jp-test` because well-formedness is the property
+   ;; that has to hold across the WHOLE disposition space, and a jurisdiction
+   ;; that only appears in its own suite is a corner of that space nobody
+   ;; checks for internal consistency.
+   {:name :hard.us/unchecked-jurisdiction
+    :employee (assoc jp-employee :jurisdiction [:us])
+    :receipt good-receipt :request {:employee-id "emp-1"}
+    :proposal (base :tax-treatment :input-tax-credit)}
+
+   {:name :hard.eu/invoice-preservation-unread
+    ;; the EU one. A well-formed VAT ID, so rule 8 passes and rule 7 never
+    ;; fires — this case is held by rule 11 alone, which is exactly the
+    ;; combination that committed before rule 11 existed.
+    :employee (assoc jp-employee :jurisdiction [:eu])
+    :receipt (assoc good-receipt :registration-number "DE123456789")
+    :request {:employee-id "emp-1"}
+    :proposal (base :tax-treatment :input-tax-credit)}
+
+   {:name :clean/eu-no-credit-claimed
+    ;; and the EU claim that legitimately commits: no 仕入税額控除 sought, so
+    ;; no unread precondition is reached. Rule 11 must not refuse ordinary
+    ;; reimbursement abroad.
+    :employee (assoc jp-employee :jurisdiction [:eu])
+    :receipt good-receipt :request {:employee-id "emp-1"}
+    :proposal (base)}
+
    {:name :escalate/disburse
     :employee jp-employee :receipt good-receipt :request {:employee-id "emp-1"}
     :proposal {:op :disburse :effect :propose :amount 5000 :confidence 0.99}}
@@ -147,17 +176,35 @@
   ;; disposition would pass while checking almost nothing — the failure mode
   ;; CLAUDE.md records as "measured nothing and reported clean".
   (let [vs (map verdict-for cases)]
-    (is (>= (count (filter :ok? vs)) 1) "no clean case")
-    (is (>= (count (filter :hard? vs)) 10) "HARD rules under-covered")
+    (is (>= (count (filter :ok? vs)) 2) "no clean case")
+    (is (>= (count (filter :hard? vs)) 12) "HARD rules under-covered")
     (is (>= (count (filter :escalate? vs)) 4) "escalation under-covered")
     (is (= (count cases) (count vs)))))
+
+(deftest the-case-set-covers-every-jurisdiction-the-actor-can-be-asked-about
+  ;; A second evidence floor, on the axis the taxlaw bump moved. Coverage
+  ;; counts above are satisfied entirely by `[:jp]` cases, so they would not
+  ;; notice the EU and US shapes falling out of this file.
+  (let [js (into #{} (map (comp :jurisdiction :employee)) cases)]
+    (is (contains? js :jp))
+    (is (contains? js [:eu]))
+    (is (contains? js [:us]))
+    (is (contains? js :atlantis) "and one that is still not catalogued")))
 
 (deftest every-named-hard-case-actually-raises-the-rule-it-is-named-for
   ;; Without this, a case named :hard/amount-mismatch that in fact trips
   ;; :no-receipt still counts toward the coverage floor above, and the floor
   ;; becomes decoration. The name is parsed, so adding a case cannot forget it.
+  ;;
+  ;; The namespace is matched by PREFIX rather than equality, so a rule can
+  ;; be exercised in more than one jurisdiction without two cases colliding
+  ;; on the same name: `:hard.us/unchecked-jurisdiction` and
+  ;; `:hard/unchecked-jurisdiction` are distinct labels that both parse to
+  ;; the same rule. The check itself is unchanged and still exact — widening
+  ;; it to `contains?` on any rule is what would have made it decoration, and
+  ;; it caught this very case being misnamed `:hard/…-us`.
   (doseq [{:keys [name] :as c} cases
-          :when (= "hard" (namespace name))]
+          :when (str/starts-with? (or (namespace name) "") "hard")]
     (testing (str name)
       (let [rules (into #{} (map :rule) (:violations (verdict-for c)))]
         (is (contains? rules (keyword (clojure.core/name name)))

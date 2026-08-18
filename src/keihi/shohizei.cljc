@@ -60,6 +60,22 @@
   caller reaching for it gets nil (falsey — the conservative answer) and a
   caller that wants to tell `refused` from `not asked` can.
 
+  ## `:none` was inert until 2026-08-18, and that was the bug
+
+  The paragraph above was written prospectively — no catalogued non-JP
+  jurisdiction existed to test it against. taxlaw@d2663b54 added `[:eu]` and
+  `[:us]`, and the prediction held here: both land on `:none`, because what
+  the catalog read for them is a DIFFERENT rule.
+
+  What did not hold was downstream. `keihi.governor` only acted on
+  `:checked`, so `:none` from this namespace changed nothing — and for
+  `[:eu]`, where taxlaw *does* supply an invoice rule, the governor's own
+  `:unchecked-jurisdiction` fell silent too and an input-tax-credit claim
+  COMMITTED with this article's precondition never asked. Rule 11
+  (`:invoice-preservation-unread`) is the fix. **Returning the right
+  three-valued answer is only half of it; something has to act on the arm
+  that means `nobody looked`.**
+
   Dependency-free, like taxlaw and for the same reason: an actor that needs to
   know what 第三十条第七項 requires should not thereby acquire a store, a
   ledger or a graph."

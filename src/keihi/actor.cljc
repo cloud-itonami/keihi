@@ -49,6 +49,26 @@
          :claim-id (:claim-id request)
          :employee-id (:employee-id request)))
 
+(defn decide
+  "Which disposition a verdict routes to.
+
+  `:hard?` is tested FIRST, and it stays first: it is what kept the one
+  drifted governor in the fleet from actually mis-routing, so a malformed
+  verdict from anywhere still fails closed.
+
+  Extracted from the `:decide` node rather than left inline, because inline
+  it could not be handed a verdict this governor cannot produce.
+  `governor.core/verdict` makes `:hard?` and `:escalate?` mutually exclusive,
+  so through the graph the ORDER of the two clauses is unobservable — and a
+  mutation swapping them survived the entire suite on 2026-08-18. The clause
+  order defends against a governor that has drifted, and the only way to
+  measure that defence is to give it the drift."
+  [verdict]
+  (cond
+    (:hard? verdict) :hold
+    (:escalate? verdict) :request-approval
+    :else :commit))
+
 (defn build-graph
   "Build a compiled KeihiActor graph. `store` implements `keihi.store/Store`.
   `advisor` implements `keihi.advisor/Advisor` (defaults to `mock-advisor`).
@@ -77,15 +97,7 @@
                       {:verdict v
                        :audit [{:node :govern :verdict v}]})))
       (g/add-node :decide
-                  (fn [{:keys [verdict]}]
-                    ;; `:hard?` first, and it stays first: it is what kept the
-                    ;; one drifted governor in the fleet from actually
-                    ;; mis-routing, so a malformed verdict from anywhere still
-                    ;; fails closed.
-                    {:disposition (cond
-                                    (:hard? verdict) :hold
-                                    (:escalate? verdict) :request-approval
-                                    :else :commit)}))
+                  (fn [{:keys [verdict]}] {:disposition (decide verdict)}))
       (g/add-node :escalate
                   (fn [{:keys [request verdict]}]
                     (store/append-ledger! store
