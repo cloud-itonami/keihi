@@ -186,14 +186,33 @@
 
   `:none` is the one that matters. It is not a pass and it is not a refusal,
   and a surface that printed nothing for it would show an unchecked
-  jurisdiction exactly the way it shows a satisfied one."
+  jurisdiction exactly the way it shows a satisfied one.
+
+  ## `:limits` and `:retention` — because `:checked` is not `valid`
+
+  One keyword per statute was enough while `[:jp]` was the only jurisdiction
+  whose facets were read. It stopped being enough at taxlaw@d2663b54: a
+  `:credit :checked` for `[:eu]` means the ISO 3166 alpha-2 PREFIX of the VAT
+  identification number matched, and Article 215 gives nothing else — the
+  body is Member State law nobody read. Printing `:checked` and stopping
+  would tell an operator the VAT number is valid, which is strictly more than
+  was measured, and is the same failure as printing nothing for `:none`.
+
+  So the verdict's `:limits` come through whole (each names the facet, what
+  was checked, what was not, and why), and so does `:retention` — where nil
+  years is the instrument's answer for `[:eu]` and `[:us]` and NOT missing
+  data. Both are computed once in the governor and carried, never re-derived
+  here; a surface that recomputed them would drift from the hold it is
+  displaying."
   [verdict]
   (let [tax (:tax verdict)]
     {:assessed (some? tax)
      :credit (or (:taxlaw/coverage (:credit tax)) :not-claimed)
      :preservation (or (:taxlaw/coverage (:preservation tax)) :not-assessed)
      :invoice-preservation (or (:keihi/coverage (:invoice-preservation tax))
-                               :not-assessed)}))
+                               :not-assessed)
+     :limits (vec (:limits tax))
+     :retention (:retention tax)}))
 
 (defn- violation-summary [verdict]
   (mapv #(select-keys % [:rule :detail]) (:violations verdict)))

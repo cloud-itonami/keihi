@@ -113,3 +113,30 @@
                                      {} "t-7")]
       (is (= :hold (get-in result [:state :disposition])))
       (is (empty? (store/records-of st "emp-1"))))))
+
+;; ---------------------------------------------------------------------------
+;; Routing a verdict this governor cannot produce
+;; ---------------------------------------------------------------------------
+
+(deftest a-hard-hold-is-never-routed-to-approval-even-if-the-verdict-drifts
+  (testing "MEASURED 2026-08-18: swapping the two clauses of `decide` survived
+            the whole suite. `governor.core/verdict` makes `:hard?` and
+            `:escalate?` mutually exclusive, so no verdict THIS governor emits
+            can tell the order apart — and the clause order exists precisely
+            for a governor that has drifted, which is the failure
+            `kotoba-lang/governor` measured in one of 376 copies. The only way
+            to measure the defence is to hand it the drift"
+    (is (= :hold (actor/decide {:hard? true :escalate? true}))
+        "an approver must not be invited to wave through a HARD hold")
+    (is (= :hold (actor/decide {:hard? true :escalate? true :ok? true}))
+        "nor may a verdict claiming to be ok route past it")))
+
+(deftest decide-covers-the-three-dispositions-it-can-return
+  ;; Evidence floor: the assertion above is about ONE malformed shape, and a
+  ;; `decide` that returned :hold unconditionally would satisfy it.
+  (is (= :hold (actor/decide {:hard? true})))
+  (is (= :request-approval (actor/decide {:escalate? true})))
+  (is (= :commit (actor/decide {:ok? true})))
+  (is (= :commit (actor/decide {}))
+      "an empty verdict is not a shape this governor emits either; recorded
+       so that changing it is a decision rather than an accident"))

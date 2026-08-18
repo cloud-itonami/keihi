@@ -76,6 +76,35 @@
     (testing "nothing landed under emp-1 despite the body naming it"
       (is (empty? (store/records-of st "emp-1"))))))
 
+(deftest the-body-is-narrowed-to-seven-structural-keys-at-the-boundary
+  (testing "MEASURED 2026-08-18: the two tests around this one assert that the
+            op and the employee come from the edge rather than the body, and
+            they hold TWICE over — `parse-claim-body` strips both keys, and
+            the assoc downstream overrides them anyway. Neither defence could
+            be mutated away on its own, so neither was measured. This pins the
+            first one: the allow-list is the boundary, and anything the caller
+            invents stops here rather than riding into the graph"
+    (let [parsed (edge/parse-claim-body
+                  (pr-str {:claim-id "c-1" :receipt "rc-1" :amount 5000
+                           :lines [{:purpose "会議費" :amount 5000}]
+                           :tax-treatment :input-tax-credit
+                           :preservation-exception {:kind :disaster}
+                           :stake :low
+                           ;; everything below is the caller inventing
+                           :op :disburse
+                           :employee-id "emp-2"
+                           :effect :direct-payment
+                           :confidence 1.0
+                           :jurisdiction :jp}))]
+      (is (= #{:claim-id :receipt :amount :lines :tax-treatment
+               :preservation-exception :stake}
+             (set (keys parsed)))
+          "exactly the seven, and nothing the caller added")
+      (is (not (contains? parsed :op)))
+      (is (not (contains? parsed :employee-id)))
+      (is (not (contains? parsed :confidence))
+          "a caller must not be able to hand itself a confidence either"))))
+
 (deftest the-body-cannot-choose-the-op-and-so-cannot-reach-the-money
   (testing ":disburse always escalates; a body asking for it submits a claim
             instead, and the committed record says so"
@@ -181,7 +210,12 @@
   (let [st (seeded store/mem-store :atlantis)
         r (submit st "did:key:zAlice" (body :tax-treatment :input-tax-credit))]
     (is (= 409 (:status r)))
-    (is (= [:unchecked-jurisdiction] (mapv :rule (get-in r [:body :violations]))))
+    ;; Both unread preconditions, in order. See the note in
+    ;; `keihi.store-contract-test` — `:atlantis` has neither an invoice rule
+    ;; nor a 請求書等の保存 rule read for it, and since taxlaw@d2663b54 those
+    ;; are two separable answers rather than one.
+    (is (= [:unchecked-jurisdiction :invoice-preservation-unread]
+           (mapv :rule (get-in r [:body :violations]))))
     (is (= :none (get-in r [:body :tax :credit])))
     (is (= :none (get-in r [:body :tax :invoice-preservation])))))
 

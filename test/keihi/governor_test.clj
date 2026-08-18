@@ -93,6 +93,23 @@
       (is (:hard? v))
       (is (contains? (rules-of v) :amount-mismatch)))))
 
+(deftest a-claim-with-neither-a-total-nor-any-lines-is-held
+  (testing "MEASURED 2026-08-18: `hard-on-a-claim-with-no-amount-at-all` above
+            passes with `amount` defaulted to 0, because its lines sum to
+            5000 and `0 ≠ 5000` violates just as `nil ≠ 5000` does. The
+            case the docstring actually warns about is the EMPTY one — a
+            claim that forgot its total over no lines at all, where a default
+            turns the check into a coincidental 0 = 0 pass and the governor
+            approves a reimbursement no document supports"
+    (let [v (governor/check {:employee-id "emp-1"} {}
+                            (claim :amount nil :lines []) (fresh-store))
+          detail (:detail (first (filter #(= :amount-mismatch (:rule %))
+                                         (:violations v))))]
+      (is (:hard? v))
+      (is (contains? (rules-of v) :amount-mismatch))
+      (is (re-find #"nil" detail)
+          "the hold shows that the total is absent rather than zero"))))
+
 (deftest a-single-line-claim-adds-up
   (let [v (governor/check {:employee-id "emp-1"} {}
                           (claim :amount 5000

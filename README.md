@@ -18,12 +18,13 @@ Two capability libraries do the work this repo does not:
 the verdict, and [`kotoba-lang/taxlaw`](https://github.com/kotoba-lang/taxlaw)
 answers what a tax record must carry. Neither is vendored.
 
-**87 tests / 353 assertions green**, measured 2026-08-17 from a fresh
+**137 tests / 570 assertions green**, measured 2026-08-18 from a fresh
 `git clone` into `/tmp` with no sibling checkouts (see *Forkable for real*,
 below). Two store backends answer identically under one contract test, and
-three HTTP routes are the whole network surface.
+three HTTP routes are the whole network surface. **59 mutations, 59 killed**
+— `nbb tools/mutate.cljs`, no longer a table typed by hand.
 
-## Ten HARD invariants (never approvable past)
+## Eleven HARD invariants (never approvable past)
 
 | # | rule | what it refuses | whose rule |
 |---|---|---|---|
@@ -37,15 +38,19 @@ three HTTP routes are the whole network surface.
 | 8 | `:invalid-registration-number` | 仕入税額控除 on a receipt with no valid 登録番号 | taxlaw |
 | 9 | `:electronic-record-not-preserved` | an 電子取引 kept only on paper — 電子帳簿保存法 第七条 | taxlaw |
 | 10 | `:invoice-not-preserved` | 仕入税額控除 whose 請求書等 is not preserved — 消費税法 第三十条第七項 | **keihi** |
+| 11 | `:invoice-preservation-unread` | 仕入税額控除 where that preservation rule was never READ | **keihi** |
 
 Rule 6 is the one that reads oddly until you try to approve past it. Whichever
 number is wrong, nobody knows which — so paying either figure pays an amount no
 document supports, and there is nothing for a human to sign off.
 
-Rules 7, 8 and 10 fire **only** on a proposal that claims 仕入税額控除. Rule 9
-does not: 第七条 binds the 保存義務者 whenever an 電子取引 happened, not only when
-a credit is claimed for it. The actor does not invent a tax position in order
-to have one to check.
+Rules 7, 8, 10 and 11 fire **only** on a proposal that claims 仕入税額控除.
+Rule 9 does not: 第七条 binds the 保存義務者 whenever an 電子取引 happened, not
+only when a credit is claimed for it. The actor does not invent a tax position
+in order to have one to check.
+
+Rule 11 is rule 10's *unread* arm and it is the newest, because it was the
+newest hole. See *Outside Japan*, below.
 
 ### Escalations (human sign-off; the operation is legitimate)
 
@@ -98,6 +103,61 @@ entry silently switch 消費税法 on for California.
 While verifying, taxlaw's own quote of **電子帳簿保存法 第七条** was refetched
 from `law_data/410AC0000000025` and matched its catalog byte for byte.
 
+## Outside Japan
+
+`kotoba-lang/taxlaw` gained `[:eu]` and `[:us]` at `d2663b54`, and coverage
+there became per **facet** rather than per jurisdiction. Being in the catalog
+stopped meaning the catalog answers the question you are asking, and this
+actor asks four separate ones.
+
+| | `[:jp]` | `[:eu]` | `[:us]` |
+|---|---|---|---|
+| a VAT-ID / 登録番号 on the invoice | `T`+13桁, checked | Art 226(3) — **prefix only** | **no federal analogue** |
+| 請求書等の保存 conditions the credit | 消費税法 第三十条第七項, read | **not read** | **not read** |
+| the HOLDER must preserve an 電磁的記録 | 電帳法 第七条, yes | **the Directive does not say** | not read |
+| how long to keep it | 7 years, *qualified* | **no number** in the instrument | **no number** in the instrument |
+| an input-tax-credit claim | can commit | **HELD** by rule 11 | **HELD** by rules 7 and 11 |
+
+**What bumping the pin actually did.** One thing widened, and it was measured
+before it was fixed. Rule 7 had been doing two jobs — *no invoice rule was read
+here* and *no preservation rule was read here* — because until `[:eu]` existed
+no jurisdiction could separate them. `[:eu]` separates them: the Directive
+supplies an invoice rule, rule 7 correctly falls silent, and a claim quoting
+`DE123456789` went from **HELD to COMMITTED** with 消費税法 第三十条第七項's
+precondition never asked. Rule 11 is that second job, named.
+
+**A `true` from the EU format check is a prefix and nothing else.** Article 215
+gives the ISO 3166 alpha-2 prefix; the body of the number is Member State law
+taxlaw has not read. So the verdict carries a `:registration-format-partial`
+limit naming `:member-state-is-a-member`, `:body-format` and `:check-digit` as
+**not checked**, and the HTTP response carries it too. `:credit :checked` on
+its own would say *the VAT number is valid*, which is more than was measured.
+
+**An EU electronic receipt kept on paper is not held, and not reported as
+preserved either.** 電帳法 第七条 binds the *holder* to preserve; Articles 218
+and 246 bind the *Member State* to accept. Same facet key, opposite direction.
+Holding would enforce a rule the Directive does not contain — the mistake the
+ただし書 handling already refuses in the other direction — so rule 9 stays
+silent and an `:electronic-preservation-unread` limit carries the Directive's
+own reason instead.
+
+**A US claim is held with the reason, not with a bare refusal.** There is no
+federal VAT, so taxlaw marks the facet `:out-of-scope` with that sentence and
+`credit-support` answers `:none` exactly as it did before the United States
+was catalogued. Rule 7's detail used to say the jurisdiction was
+`kotoba.taxlaw に無い`; that became false for precisely the jurisdiction it
+would be printed for, so it now quotes taxlaw's `:taxlaw/why`.
+
+**`retention-years` is nil for both, and that nil is an answer.** Article
+247(1) hands the period to the Member State; 26 CFR § 1.6001-1(e) states a
+condition — *so long as the contents thereof may become material* — and not a
+number. Neither is the same nil as `[:atlantis]`, where nobody read anything,
+so `:retention` is three-valued (`:years` / `:no-period` / `:unread`). Nor is
+Japan's 7 a bare 7: 法人税法施行規則 第五十九条 binds 青色申告法人, the clock starts
+at 起算日 (fiscal-year end + 2 months) rather than at the receipt, and
+第二十六条の三 makes it 10 where 欠損金の繰越し is relied on. **This actor never
+hands anyone an unqualified number of years.**
+
 ## Unknown is never a pass, and the verdict says which unknown
 
 Every three-valued answer is split three ways, never two, and what could not
@@ -106,7 +166,12 @@ be checked rides on the verdict under `:tax` rather than being swallowed:
 ```clojure
 {:tax {:credit               {:taxlaw/coverage :none | :checked ...}
        :preservation         {:taxlaw/coverage :none | :not-declared | :checked ...}
-       :invoice-preservation {:keihi/coverage  :none | :no-claim | :checked ...}}}
+       :invoice-preservation {:keihi/coverage  :none | :no-claim | :checked ...}
+       ;; what could NOT be asked, as facts rather than as absences
+       :limits    [{:keihi/limit :registration-format-partial ...}
+                   {:keihi/limit :electronic-preservation-unread ...}]
+       ;; and how long to keep it — three-valued, never a bare integer
+       :retention {:keihi/retention :years | :no-period | :unread ...}}}
 ```
 
 The pass-shaped key (`:taxlaw/supported?`, `:taxlaw/preserved?`,
@@ -241,6 +306,14 @@ langchain-clj   @ 51e7b61e   6 coordinates, 0 :local/root
 keihi (this repo)            6 coordinates, 0 :local/root
 ```
 
+Re-measured 2026-08-18 across the whole resolved tree — 9 `deps.edn`, 27
+coordinates — and it found **one**, which this section had not mentioned
+because it only ever looked at two files: `langgraph@5b4e5e70` carries
+`{:local/root "../langchain"}` in a **`:dev` alias**. Alias deps are not
+inherited by dependents and keihi never activates it, so the property holds
+here — but *0 across the tree* would have been the wrong sentence, and the
+fresh-clone run below is what actually settles it either way.
+
 And then the only check that actually settles it — the suite run from a fresh
 `git clone` into `/tmp`, where no checkout of `governor`, `taxlaw`, `langgraph`
 or `langchain-store` exists:
@@ -248,16 +321,65 @@ or `langchain-store` exists:
 ```
 $ git clone https://github.com/cloud-itonami/keihi.git /tmp/keihi && cd /tmp/keihi
 $ clojure -M:test
-Ran 87 tests containing 353 assertions.
+Ran 137 tests containing 570 assertions.
 0 failures, 0 errors.
 ```
 
 ## Proving the tests can fail
 
 A suite that stays green when you break the thing it tests is worthless, and
-the only way to tell the two apart is to break it. **All 33 mutations below
-were applied one at a time to a clean tree and the suite re-run; every one of
-them reddened at least one test, and none survived.**
+the only way to tell the two apart is to break it.
+
+### The harness
+
+```bash
+nbb tools/check-mutations.cljs   # every :find occurs exactly once — run this first
+nbb tools/mutate.cljs            # the whole table
+nbb tools/mutate.cljs :no-receipt  # one, by id
+```
+
+`tools/mutations.edn` holds **59 mutations**; measured 2026-08-18, **59 killed,
+0 survived, 0 unmeasured**. Each applies one single-token change to one file
+under `src/keihi/`, runs `clojure -M:test`, records which tests reddened, and
+restores the file. A mutation that reddens nothing is reported as a SURVIVOR,
+which is a finding about the suite rather than about the mutation; one that
+stops the file READING is reported UNMEASURED and scores as neither.
+
+The table's own header states what it covers and what it does not. It does
+**not** cover `kotoba-lang/taxlaw`, `kotoba-lang/governor`, `langgraph` or
+`langchain-store` — mutating a dependency is that dependency's suite's job —
+nor the LLM advisor path, nor prose in `:detail` strings beyond the substrings
+tests actually read.
+
+### The four that survived the first run, and what each one was
+
+Writing the table from the source rather than from the tests is the point; a
+table clean on its first run usually means the mutations were written
+backwards from the assertions. This one was not clean.
+
+| survivor | verdict | what was done |
+|---|---|---|
+| `:amount-defaults-to-zero` | **real gap** | The existing no-amount test has lines summing 5000, so `0 ≠ 5000` violates just as `nil ≠ 5000` does. The case the docstring warns about is the EMPTY one, where a default makes `0 = 0` a pass. Added `a-claim-with-neither-a-total-nor-any-lines-is-held`. |
+| `:hard-is-tested-first` | **real gap** | `governor.core/verdict` makes `:hard?` and `:escalate?` exclusive, so no verdict this governor emits can tell the clause order apart — and the order exists for a governor that has DRIFTED. Extracted `keihi.actor/decide` so it can be handed the drift, and asserted it. |
+| `:the-op-is-not-read-from-the-body` | **no-op** | `parse-claim-body` strips `:op` via `select-keys` before the assoc is reached, so `(:op body)` is nil whatever the caller sent. Removed, with the reason recorded in the table rather than by deleting it quietly. |
+| `:the-employee-comes-from-the-did` | **no-op** | Same shape, same key allow-list. |
+
+Both no-ops were **defence in depth**, not silence: the property is asserted
+end to end by `the-body-cannot-choose-the-op-and-so-cannot-reach-the-money`
+and `the-employee-comes-from-the-did-not-the-body`, and holds by two
+independent mechanisms, so no single-token mutation of either can kill it.
+What *was* unmeasured is the key allow-list itself, which nothing pinned — so
+the two removed entries were replaced by one that is killable
+(`:parse-claim-body-strips-unknown-keys`) and by the test that kills it.
+
+### The earlier hand-run measurement
+
+The 33 mutations below were applied **by hand**, one at a time, at
+`taxlaw@718b09ea` against a 87-test suite, before `tools/` existed. They are
+kept because several of them — 21, 22 and 23 especially — say something the
+current table does not, and the paragraphs after it are the argument for the
+contract test. **Their counts have not been re-measured against the current
+suite and should not be quoted as current.**
 
 | # | mutation | tests reddened |
 |---|---|---|
