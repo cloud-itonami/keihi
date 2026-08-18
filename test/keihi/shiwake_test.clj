@@ -1,0 +1,84 @@
+(ns keihi.shiwake-test
+  "An approved claim becoming a journal entry — and every way that hand-off
+  can quietly lose one."
+  (:require [clojure.test :refer [deftest is testing]]
+            [keihi.shiwake :as shiwake]))
+
+(def ^:private mapping
+  {:travel {:debit "旅費交通費" :credit "未払金"}
+   :meals  {:debit "会議費"     :credit "未払金"}})
+
+(defn- committed [& {:keys [disposition category amount receipt currency]
+                     :or {disposition :commit category :travel amount 1200
+                          receipt "r-1" currency "JPY"}}]
+  {:disposition disposition
+   :claim {:category category :amount amount :receipt receipt :currency currency}})
+
+(deftest an-approved-claim-becomes-a-balanced-entry
+  (let [r (shiwake/entry-request (committed) mapping)
+        req (:shiwake/request r)]
+    (is (= :ok (:shiwake/status r)))
+    (is (= :draft-entry (:op req)))
+    (is (= "r-1" (:source-doc req)))
+    (is (= [["旅費交通費" :dr 1200] ["未払金" :cr 1200]]
+           (mapv (juxt :account :side :amount) (:lines req))))
+    (is (= ["JPY" "JPY"] (mapv :currency (:lines req))))))
+
+(deftest a-claim-that-was-not-approved-yields-a-named-refusal
+  (testing "not nil — a caller treating `no entry` as `nothing to do` would
+            skip exactly the claims somebody has to look at"
+    (doseq [d [:hold :request-approval]]
+      (let [r (shiwake/entry-request (committed :disposition d) mapping)]
+        (is (= :not-approved (:shiwake/status r)))
+        (is (= d (:shiwake/disposition r)))
+        (is (nil? (:shiwake/request r)))))))
+
+(deftest an-unmapped-category-is-refused-not-suspensed
+  (testing "falling back to a suspense account would post the entry and make
+            the missing decision invisible"
+    (let [r (shiwake/entry-request (committed :category :entertainment) mapping)]
+      (is (= :no-mapping (:shiwake/status r)))
+      (is (= :entertainment (:shiwake/category r)))
+      (is (nil? (:shiwake/request r)))))
+  (testing "a half-filled mapping is no mapping — an entry missing one line
+            balances by having lost it"
+    (is (= :no-mapping (:shiwake/status
+                        (shiwake/entry-request (committed)
+                                               {:travel {:debit "旅費交通費"}}))))
+    (is (= :no-mapping (:shiwake/status
+                        (shiwake/entry-request (committed)
+                                               {:travel {:debit "" :credit "未払金"}}))))))
+
+(deftest an-unusable-claim-is-refused
+  (doseq [c [(committed :amount 0) (committed :amount -5) (committed :amount nil)
+             (committed :amount "1200") (committed :receipt nil) (committed :receipt "")]]
+    (is (= :unusable-claim (:shiwake/status (shiwake/entry-request c mapping))))))
+
+(deftest the-receipt-is-carried-as-the-source-document
+  (testing "4311 holds an entry citing a document it has no record of, so a
+            claim approved here against an unregistered receipt is refused
+            there rather than posted — the ledger's registry is the one that
+            counts"
+    (is (= "r-99" (get-in (shiwake/entry-request (committed :receipt "r-99") mapping)
+                          [:shiwake/request :source-doc])))))
+
+(deftest a-batch-keeps-what-it-could-not-convert
+  (testing "filtering would report a clean run and leave the unconvertible
+            claims invisible"
+    (let [b (shiwake/entry-requests
+             [(committed) (committed :disposition :hold) (committed :category :unknown)]
+             mapping)]
+      (is (= 1 (count (:ok b))))
+      (is (= 2 (count (:skipped b))))
+      (is (= #{:not-approved :no-mapping}
+             (set (map :shiwake/status (:skipped b)))))
+      (is (every? :shiwake/claim (:skipped b))
+          "each refusal carries the claim it refused, or it cannot be acted on"))))
+
+(deftest this-namespace-reaches-nothing
+  (testing "it produces a value; reaching across to write into another
+            actor's ledger would be the actuation this repo refuses"
+    (let [src (slurp "src/keihi/shiwake.cljc")]
+      (doseq [tok ["http" "fetch" "slurp" "4311" "client/" "js/"]]
+        (is (not (re-find (re-pattern (str "\\(" tok)) src))
+            (str "shiwake must not call out: found " tok))))))
