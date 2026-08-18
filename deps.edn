@@ -13,7 +13,22 @@
         ;; what a tax record must carry, by jurisdiction.
         io.github.kotoba-lang/taxlaw
         {:git/url "https://github.com/kotoba-lang/taxlaw.git"
-         :git/sha "718b09ea4fd608dc3a12d0baaa095588046a2e5c"}}
+         :git/sha "718b09ea4fd608dc3a12d0baaa095588046a2e5c"}
+
+        ;; shared langchain.db store seam (EDN-blob codec + identity schema +
+        ;; seq-keyed event streams) — ADR-2607141600. What `keihi.store`'s
+        ;; DatomicStore is built on; the codec is NOT re-hand-rolled here,
+        ;; which is the duplication that library was extracted to end.
+        ;;
+        ;; Checked by PARSING its deps.edn as EDN at the pin below, not by
+        ;; grepping it: that file's comments contain the literal `:local/root`
+        ;; while its coordinates contain none, and a grep reports the comment.
+        ;; Measured 2026-08-17 — 5 coordinates (:deps + every alias's
+        ;; :extra-deps/:replace-deps/:override-deps), 0 `:local/root`; same for
+        ;; its own single dependency, langchain-clj @ 51e7b61e.
+        io.github.kotoba-lang/langchain-store
+        {:git/url "https://github.com/kotoba-lang/langchain-store.git"
+         :git/sha "b986669f72276568c97e1fa5b331a5ff3017bf69"}}
 
  ;; ---------------------------------------------------------------------------
  ;; ZERO `:local/root`, and that is a hard property rather than a preference.
@@ -23,11 +38,11 @@
  ;; and no siblings — a gate would fail on a missing directory and read as a
  ;; broken build rather than as a broken dependency declaration.
  ;;
- ;; Measured 2026-08-17: the suite below was run from /tmp/keihi, where no
- ;; sibling checkout of governor, taxlaw or langgraph exists. That is the only
- ;; check that actually proves the property; grepping this file does not,
- ;; because a transitive `:local/root` in a dependency is just as fatal and
- ;; does not appear here.
+ ;; Measured 2026-08-17: the suite below was run from a fresh `git clone` into
+ ;; /tmp, where no sibling checkout of governor, taxlaw, langgraph or
+ ;; langchain-store exists. That is the only check that actually proves the
+ ;; property; grepping this file does not, because a transitive `:local/root`
+ ;; in a dependency is just as fatal and does not appear here.
  ;; ---------------------------------------------------------------------------
 
  :aliases

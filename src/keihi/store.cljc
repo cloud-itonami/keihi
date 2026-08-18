@@ -36,8 +36,16 @@
                never mutated.
 
     ledger   — an append-only audit trail of every proposal / verdict /
-               disposition, regardless of outcome (commit or hold)."
-  )
+               disposition, regardless of outcome (commit, escalation or
+               hold).
+
+  Two backends implement this protocol and `keihi.store-contract-test` runs
+  the same assertions against both. A backend that silently disagreed with
+  the other about ledger ORDER would be the worst kind of bug here: the
+  ledger is the only record of what was refused, and an audit trail whose
+  order depends on which backend you deployed is not an audit trail."
+  (:require [langchain.db :as d]
+            [langchain-store.core :as ls]))
 
 (defprotocol Store
   (employee [s employee-id])
@@ -69,3 +77,100 @@
   ([seed] (->MemStore (atom (merge {:employees {} :receipts {}
                                     :records [] :ledger []}
                                    seed)))))
+
+;; ---------------------------------------------------------------------------
+;; DatomicStore (langchain.db)
+;;
+;; The same protocol over a Datomic-API-compatible EAV store, so the backend is
+;; a swap and not a rewrite (cloud-itonami-isic-6511's underwriting.store is
+;; the fleet's reference adopter; kintai and tehai are the two siblings that
+;; already did this). Pure `.cljc`: it runs offline against langchain.db's
+;; in-process DataScript, and the SAME record points at a real Datomic or a
+;; kotoba-server pod by swapping langchain.db's `:db-api` (langchain.kotoba-db).
+;;
+;; The LEDGER is why this exists. `MemStore` keeps the audit trail for exactly
+;; as long as the process lives, and an expense actor whose record of what it
+;; refused disappears on restart cannot answer the one question anybody asks it
+;; later — why was this claim not paid. The record stream has the same problem
+;; from the other side: a reimbursement that was committed and then forgotten
+;; is a reimbursement that can be claimed twice.
+;;
+;; Both streams are seq-keyed and append-only on both backends. `:record/seq`
+;; and `:ledger/seq` are `:db.unique/identity`, so re-appending at a seq that
+;; already exists UPSERTS rather than forking the log — which is precisely why
+;; `next-seq` has to be right, and why the contract test asserts order rather
+;; than merely count.
+;; ---------------------------------------------------------------------------
+
+(def ^:private schema
+  (ls/identity-schema [:employee/id :receipt/id :record/seq :ledger/seq]))
+
+(defn- next-seq [conn seq-attr]
+  (count (d/q [:find '?e :where ['?e seq-attr '_]] (d/db conn))))
+
+(defrecord DatomicStore [conn]
+  Store
+  (employee [_ employee-id]
+    (ls/blob-lookup conn :employee/id :employee/edn employee-id))
+  (receipt [_ receipt-id]
+    (ls/blob-lookup conn :receipt/id :receipt/edn receipt-id))
+  (records-of [_ employee-id]
+    (filterv #(= employee-id (:employee-id %))
+             (ls/read-stream conn :record/seq :record/edn)))
+  (ledger [_] (ls/read-stream conn :ledger/seq :ledger/fact))
+  (register-employee! [s e]
+    (ls/put-blob! conn :employee/id :employee/edn (:employee-id e) e) s)
+  (register-receipt! [s r]
+    (ls/put-blob! conn :receipt/id :receipt/edn (:receipt-id r) r) s)
+  (commit-record! [s record]
+    (ls/append-blob! conn :record/seq :record/edn
+                     (next-seq conn :record/seq) record) s)
+  (append-ledger! [s fact]
+    (ls/append-blob! conn :ledger/seq :ledger/fact
+                     (next-seq conn :ledger/seq) fact) s))
+
+(defn datomic-store
+  "A DatomicStore over a fresh in-process langchain.db connection.
+
+  In-process is the DEFAULT, not the guarantee. This function hands back a
+  store whose durability is whatever langchain.db's `:db-api` is bound to;
+  with the default in-process DataScript it survives no longer than MemStore
+  does. What it buys unconditionally is that the swap is a swap — the actor,
+  the governor and the edge are unchanged, and the contract test proves the
+  two backends answer identically."
+  []
+  (->DatomicStore (d/create-conn schema)))
+
+;; ---------------------------------------------------------------------------
+;; Derived reads over the ledger
+;;
+;; Plain functions over the protocol rather than protocol methods, deliberately:
+;; a backend cannot disagree with another about something neither of them
+;; implements. They are still exercised against BOTH backends in the contract
+;; test, because what they are really asserting is that `ledger` returned the
+;; same thing — filtering an out-of-order ledger produces an out-of-order
+;; history and nothing complains.
+;; ---------------------------------------------------------------------------
+
+(defn claim-history
+  "Every ledger entry for `claim-id`, oldest first — the whole life of one
+  claim (escalated, then committed; or held), not just its latest state.
+
+  Returns `[]` for a claim id nobody has heard of. That is NOT the same as a
+  claim with no verdict, and callers must not render it as one: an empty
+  history means the actor has no record of this claim at all.
+
+  A nil `claim-id` returns nil rather than every entry that happens to carry
+  no claim id. Matching nil against nil is how a lookup for `nothing` quietly
+  becomes a lookup for `everything`."
+  [store claim-id]
+  (when (some? claim-id)
+    (filterv #(= claim-id (:claim-id %)) (ledger store))))
+
+(defn ledger-of
+  "Every ledger entry belonging to `employee-id`, oldest first. Same nil rule
+  as `claim-history`, for the same reason — and here the consequence of
+  getting it wrong is one employee reading the whole company's spending."
+  [store employee-id]
+  (when (some? employee-id)
+    (filterv #(= employee-id (:employee-id %)) (ledger store))))
