@@ -408,3 +408,31 @@ fall back for an unmapped category (8), drop the credit line (2), accept a
 negative amount (2), have the batch discard skips (2), drop the claim from a
 refusal (1), drop the source document (2).
 
+## 引継ぎの記録 — converted is not posted
+
+`keihi.shiwake` turns an approved claim into a request. Something else
+carries it to 4311, which can post it, find it **already** posted, hold it,
+escalate it, or refuse it — and until `keihi.handoff` existed **all five
+looked identical from here.** There was no trace at all.
+
+`fact` turns one 4311 response into the ledger fact this actor appends;
+`facts` does a batch; `unresolved` is the operator's queue.
+
+| | |
+|---|---|
+| **the good outcome is recorded too** | a ledger writing down only refusals cannot answer *was this claim posted?*, which is the question the loop exists to close |
+| **`:duplicate` is not `:posted`** | one says *I wrote this*, the other *this was already there*. Folding them leaves a reconciliation unable to tell a carrier that retried from one that submitted work nobody confirmed |
+| **unrecognised never becomes success** | `:unknown-response`, keeping the status and body so the shape can be diagnosed. Defaulting the unanticipated case to success is how a hand-off reports a clean run over entries nobody accepted |
+| **a length mismatch produces NO facts** | results are positional; pairing a mismatch would misattribute every outcome — silently, in a record whose whole purpose is attribution |
+| **an outcome 4311 did not name is not trusted** | recorded as unknown *and* kept as `:handoff/reported-outcome`, so protocol drift is visible instead of quietly classified |
+
+Pure: no HTTP, no client, no reference to 4311, asserted by a source scan
+with an evidence floor on characters read. Carrying the request is not this
+actor's job; recording what came back is.
+
+Measured, all eight mutations red: fold duplicate into posted (1), treat an
+unknown response as posted (11), skip recording the success (**2 errors — it
+reddens by throw, not by assertion, which is weaker and recorded as such**),
+zip a length mismatch (4), trust an unnamed outcome (1), drop the claim (1),
+put duplicates in the unresolved queue (2), drop the violations (1).
+

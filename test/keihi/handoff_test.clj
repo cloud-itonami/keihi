@@ -1,0 +1,125 @@
+(ns keihi.handoff-test
+  "Converted is not posted. These tests are about the four ways a hand-off
+  record can fail to say what happened."
+  (:require [clojure.test :refer [deftest is testing]]
+            [keihi.handoff :as handoff]))
+
+(def ^:private claim {:claim-id "cl-1" :receipt "r-1"})
+
+(defn- resp [status body] {:status status :body body})
+
+;; ---------------------------------------------------------------------------
+;; 1. the good outcome must be recorded too
+;; ---------------------------------------------------------------------------
+
+(deftest a-posted-entry-is-recorded
+  (testing "a ledger that wrote down only refusals could not answer
+            `was this claim posted?`, which is the question the loop closes"
+    (let [f (handoff/fact claim (resp 200 {:ok true :posting "je-123" :duplicate? false}))]
+      (is (= :handoff (:disposition f)))
+      (is (= :posted (:handoff/outcome f)))
+      (is (= "je-123" (:handoff/posting f)))
+      (is (= claim (:handoff/claim f)) "joinable back to what it reconciles"))))
+
+;; ---------------------------------------------------------------------------
+;; 2. :duplicate is not :posted
+;; ---------------------------------------------------------------------------
+
+(deftest a-duplicate-is-its-own-outcome
+  (testing "one says `I wrote this`, the other `this was already there`.
+            Folding them would leave a reconciliation unable to tell a
+            carrier that retried from one that submitted work nobody
+            confirmed."
+    (let [f (handoff/fact claim (resp 200 {:ok true :posting "je-123" :duplicate? true}))]
+      (is (= :duplicate (:handoff/outcome f)))
+      (is (= "je-123" (:handoff/posting f)) "and it still says which posting"))))
+
+;; ---------------------------------------------------------------------------
+;; 3. an unrecognised response must never become a success
+;; ---------------------------------------------------------------------------
+
+(deftest an-unrecognised-response-is-not-posted
+  (testing "defaulting the unanticipated case to success is how a hand-off
+            reports a clean run over entries nobody accepted"
+    (doseq [r [(resp 418 {:ok false}) (resp nil nil) (resp 500 {:error "boom"})
+               {:body {:posting "je-1"}} {}]]
+      (let [f (handoff/fact claim r)]
+        (is (= :unknown-response (:handoff/outcome f)) (str "for " (pr-str r)))
+        (is (not= :posted (:handoff/outcome f))))))
+  (testing "and it keeps enough to diagnose the shape"
+    (let [f (handoff/fact claim (resp 418 {:weird true}))]
+      (is (= {:status 418 :body {:weird true}} (:handoff/response f)))))
+  (testing "which a recognised outcome does not carry — every body on every
+            fact would put a copy of the ledger in the ledger"
+    (is (not (contains? (handoff/fact claim (resp 200 {:posting "je-1"}))
+                        :handoff/response)))))
+
+(deftest each-refusal-keeps-what-it-was-refused-for
+  (let [f (handoff/fact claim (resp 409 {:violations [{:rule :unknown-source-doc
+                                                       :detail "no such doc"
+                                                       :noise "dropped"}]}))]
+    (is (= :held (:handoff/outcome f)))
+    (is (= [{:rule :unknown-source-doc :detail "no such doc"}] (:handoff/violations f))))
+  (is (= :awaiting-approval (:handoff/outcome (handoff/fact claim (resp 202 {})))))
+  (doseq [s [400 403 503]]
+    (is (= :rejected (:handoff/outcome (handoff/fact claim (resp s {:error "no"}))))))
+  (is (= "no" (:handoff/error (handoff/fact claim (resp 403 {:error "no"}))))))
+
+;; ---------------------------------------------------------------------------
+;; 4. a batch must not misattribute
+;; ---------------------------------------------------------------------------
+
+(def ^:private reqs [{:shiwake/claim {:claim-id "a"}}
+                     {:shiwake/claim {:claim-id "b"}}])
+
+(deftest a-length-mismatch-produces-no-facts-at-all
+  (testing "results are positional; pairing a mismatch would misattribute
+            every outcome, silently, in a record whose whole purpose is
+            attribution"
+    (let [r (handoff/facts reqs [{:outcome :posted :status 200}])]
+      (is (= :length-mismatch (:error r)))
+      (is (nil? (:facts r)) "not a partial pairing — none")
+      (is (= 2 (:requests r)))
+      (is (= 1 (:results r))))))
+
+(deftest a-batch-pairs-in-order
+  (let [{:keys [facts]} (handoff/facts
+                         reqs
+                         [{:outcome :posted :status 200 :posting "je-a"}
+                          {:outcome :held :status 409
+                           :violations [{:rule :unbalanced-entry :detail "x"}]}])]
+    (is (= [{:claim-id "a"} {:claim-id "b"}] (mapv :handoff/claim facts)))
+    (is (= [:posted :held] (mapv :handoff/outcome facts)))
+    (is (= "je-a" (:handoff/posting (first facts))))
+    (is (= [{:rule :unbalanced-entry :detail "x"}] (:handoff/violations (second facts))))))
+
+(deftest an-outcome-4311-did-not-name-is-not-trusted
+  (testing "a value outside the known set is recorded as unknown AND kept, so
+            a protocol drift is visible instead of silently classified"
+    (let [{:keys [facts]} (handoff/facts [(first reqs)] [{:outcome :teleported :status 200}])
+          f (first facts)]
+      (is (= :unknown-response (:handoff/outcome f)))
+      (is (= :teleported (:handoff/reported-outcome f))))))
+
+(deftest the-unresolved-queue-is-everything-that-needs-somebody
+  (let [{:keys [facts]} (handoff/facts
+                         [{:shiwake/claim {:claim-id "a"}} {:shiwake/claim {:claim-id "b"}}
+                          {:shiwake/claim {:claim-id "c"}} {:shiwake/claim {:claim-id "d"}}]
+                         [{:outcome :posted :status 200} {:outcome :duplicate :status 200}
+                          {:outcome :held :status 409} {:outcome :rejected :status 400}])]
+    (is (= [:held :rejected] (mapv :handoff/outcome (handoff/unresolved facts))))
+    (testing "a duplicate needs nobody — it is confirmation, not a problem"
+      (is (not-any? #(= :duplicate (:handoff/outcome %)) (handoff/unresolved facts))))))
+
+;; ---------------------------------------------------------------------------
+;; purity
+;; ---------------------------------------------------------------------------
+
+(deftest this-namespace-reaches-nothing
+  (testing "carrying the request is not this actor's job; recording what came
+            back is"
+    (let [src (slurp "src/keihi/handoff.cljc")]
+      (is (> (count src) 500) "evidence floor: an empty read would pass every check below")
+      (doseq [tok ["http" "fetch" "slurp" "4311" "client/" "js/"]]
+        (is (not (re-find (re-pattern (str "\\(" tok)) src))
+            (str "must not call out: found " tok))))))
