@@ -366,3 +366,45 @@ AGPL-3.0-or-later, forkable by any qualified operator. Part of the
 before they were enforced. Everything the catalogues do not cover is reported
 as uncovered rather than assumed benign — which is a property of the mechanism,
 not a claim of completeness.
+## 仕訳 — an approved claim becoming a journal entry
+
+Deciding is not bookkeeping. **A claim that was approved and never became an
+entry is a payment nobody's books show.** `keihi.shiwake/entry-request` turns
+a committed claim into the `:draft-entry` request
+[`cloud-itonami-isco-4311`](https://github.com/cloud-itonami/cloud-itonami-isco-4311)
+accepts at `POST /api/entry`.
+
+**It produces a value; it does not make a call.** No HTTP, no client, no
+reference to 4311 — asserted by a test that scans this namespace's own
+source. Two reasons, and the second carries more weight:
+
+1. This actor's ceiling is that it proposes. Writing into another actor's
+   ledger would be the actuation the whole design refuses.
+2. **A call would make the accounts this actor's business, and they are
+   not.** Which account a train fare debits is the client's chart, and
+   `kotoba-lang/shohyo` refuses to guess what an account is precisely because
+   a statement that guessed still balances. So the mapping is an argument
+   here too.
+
+Every way the hand-off could quietly lose a claim is a named status rather
+than nil:
+
+| | |
+|---|---|
+| `:not-approved` | held or escalated — **its own status**, because a caller treating "no entry" as "nothing to do" would skip exactly the claims somebody must look at |
+| `:no-mapping` | the category has no accounts. No suspense-account fallback: that would post the entry and make the missing decision invisible. A half-filled mapping is no mapping — an entry missing one line balances by having lost it |
+| `:unusable-claim` | no positive amount, or no receipt cited |
+
+The receipt travels as `:source-doc`, so 4311 refuses an entry citing a
+document its own registry does not know. That is the right way round: the
+ledger's registry is the one that counts, not this actor's.
+
+`entry-requests` returns `{:ok [...] :skipped [...]}` rather than filtering,
+and each refusal carries the claim it refused. A batch that dropped what it
+could not convert would report a clean run.
+
+Measured, all seven mutations red: emit an entry for an unapproved claim (9),
+fall back for an unmapped category (8), drop the credit line (2), accept a
+negative amount (2), have the batch discard skips (2), drop the claim from a
+refusal (1), drop the source document (2).
+
