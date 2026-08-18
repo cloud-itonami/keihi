@@ -408,6 +408,39 @@ fall back for an unmapped category (8), drop the credit line (2), accept a
 negative amount (2), have the batch discard skips (2), drop the claim from a
 refusal (1), drop the source document (2).
 
+## `POST /api/handoff` — where the carrier brings the outcome back
+
+`keihi.handoff` is pure and therefore was reachable from nothing: the
+namespace existed, the facts existed, and **no path produced one**. This is
+that path, and it runs the right way round — the carrier posts the outcome
+*here*, rather than this actor going out to fetch it. Reaching into another
+actor's ledger is the actuation this repo refuses, and that refusal is what
+left the namespace stranded.
+
+### Explicit pairs, not positions
+
+The body is `{:handoffs [{:claim {…} :response {…}} …]}`. Each pair names its
+own claim, so **this route cannot misattribute by position at all** — the
+failure `handoff/facts` must refuse a length mismatch to avoid simply does
+not arise. Where a carrier can send pairs, pairs are strictly better than
+order.
+
+### It writes everything and says what is left
+
+Every outcome is appended, the good ones included, because a ledger recording
+only refusals cannot answer *was this claim posted?*. The response carries
+`:unresolved` — everything that is not `:posted` or `:duplicate` — so the
+carrier learns in the same round trip which claims a human still has to look
+at. A duplicate needs nobody: it is confirmation, not a problem.
+
+A malformed body writes **nothing**. Half-recording a batch would leave a
+ledger nobody can trust more than an empty one.
+
+Measured, all eight mutations red: write no facts (8), skip the successes
+(6), put duplicates in the unresolved queue (1), accept a malformed pair
+(4+1), accept an empty `:handoffs` (1), remove the cap (3), drop the route
+from the dispatcher (3), answer 404 where 405 belongs (2).
+
 ## 引継ぎの記録 — converted is not posted
 
 `keihi.shiwake` turns an approved claim into a request. Something else

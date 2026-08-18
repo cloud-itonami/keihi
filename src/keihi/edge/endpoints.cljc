@@ -59,6 +59,7 @@
   read the law where this employee works` as the same green tick."
   (:require [keihi.actor :as actor]
             [keihi.store :as store]
+            [keihi.handoff :as handoff]
             #?(:clj [clojure.edn :as edn] :cljs [cljs.reader :as edn])))
 
 ;; ---------------------------------------------------------------------------
@@ -346,6 +347,77 @@
 
 (def claim-path-prefix "/api/claim/")
 
+(def max-handoffs
+  "A cap, for the same reason the ledger actor caps its batch: an uncapped
+  body is a way to hold this actor for an unbounded time on one request. 200
+  is a number, not a measurement, and it is reported in the refusal so a
+  caller learns the limit from the 400 rather than from a timeout."
+  200)
+
+(defn record-handoff-core!
+  "`POST /api/handoff`. Where the carrier brings back what the ledger actor
+  said.
+
+  `keihi.handoff` turns a response into a fact and is pure — it makes no
+  call, deliberately, because reaching into another actor's ledger is the
+  actuation this repo refuses. That left it reachable from nothing: the
+  namespace existed, the facts existed, and no path produced one. This is
+  that path, and it runs the right way round — **the carrier posts the
+  outcome here**, rather than this actor going out to fetch it.
+
+  ## Explicit pairs, not positions
+
+  The body is `{:handoffs [{:claim {…} :response {…}} …]}`. Each pair names
+  its own claim, so **this route cannot misattribute by position at all** —
+  the failure `handoff/facts` has to refuse a length mismatch to avoid does
+  not arise here, because nothing is being lined up. Where a carrier can
+  send pairs, pairs are strictly better than order.
+
+    503  no allow-list / no store configured
+    403  caller not on the allow-list
+    400  the body is not a non-empty vector of pairs, or is over `max-handoffs`
+    200  every fact appended, with the unresolved queue
+
+  ## It appends, and reports what still needs somebody
+
+  Every outcome is written, including the good ones, because a ledger that
+  recorded only refusals could not answer *was this claim posted?*. The
+  response then carries `:unresolved` — everything that is not `:posted` or
+  `:duplicate` — so the carrier learns, in the same round trip, which claims
+  a human still has to look at."
+  [store allowlist caller-did raw-body]
+  (cond
+    (nil? allowlist)
+    {:status 503 :body {:ok false :error "no allow-list configured"}}
+
+    (nil? (employee-for allowlist caller-did))
+    {:status 403 :body {:ok false :error "caller not permitted"}}
+
+    :else
+    (let [parsed (try (edn/read-string raw-body)
+                      (catch #?(:clj Exception :cljs :default) _ nil))
+          pairs (:handoffs parsed)]
+      (cond
+        (not (and (map? parsed) (vector? pairs) (seq pairs)))
+        {:status 400 :body {:ok false :error "body must be {:handoffs [{:claim … :response …} …]}"}}
+
+        (> (count pairs) max-handoffs)
+        {:status 400 :body {:ok false :error "too many handoffs"
+                            :max max-handoffs :submitted (count pairs)}}
+
+        (not (every? #(and (map? %) (contains? % :claim) (map? (:response %))) pairs))
+        {:status 400 :body {:ok false :error "each handoff needs a :claim and a map :response"}}
+
+        :else
+        (let [facts (mapv #(handoff/fact (:claim %) (:response %)) pairs)]
+          (doseq [f facts] (store/append-ledger! store f))
+          {:status 200
+           :body {:ok true
+                  :employee (employee-for allowlist caller-did)
+                  :recorded (count facts)
+                  :summary (frequencies (map :handoff/outcome facts))
+                  :unresolved (handoff/unresolved facts)}})))))
+
 (defn route
   "The whole surface, as data in and data out.
 
@@ -373,6 +445,11 @@
       (= path "/api/claim")
       (if (= method :post)
         (submit-claim-core! store mode allowlist caller-did body)
+        {:status 405 :body {:ok false :error "method not allowed" :allow [:post]}})
+
+      (= path "/api/handoff")
+      (if (= method :post)
+        (record-handoff-core! store allowlist caller-did body)
         {:status 405 :body {:ok false :error "method not allowed" :allow [:post]}})
 
       (= path "/api/ledger")
