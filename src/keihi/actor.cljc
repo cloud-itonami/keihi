@@ -6,23 +6,48 @@
   per superstep, so an interrupted run resumes after sign-off.
 
   ```text
-  :intake -> :advise -> :govern -> :decide -+-> :commit           (:ok? true)
-                                            +-> :request-approval (:escalate?, interrupt-before)
-                                            +-> :hold             (:hard? true)
+  :intake -> :advise -> :govern -> :decide -+-> :commit                        (:ok? true)
+                                            +-> :escalate -> :request-approval (:escalate?, interrupt-before)
+                                            +-> :hold                          (:hard? true)
   ```
 
   The unconditional invariant: the KeihiAdvisor can never disburse a yen the
   KeihiGovernor refuses. Every `commit-record!` is gated behind `:decide`, and
   `:decide` reads only the verdict.
 
-  Both terminal nodes append to the ledger — a hold is a fact about what the
+  Every disposition appends to the ledger — a hold is a fact about what the
   actor was asked to do, and an audit trail that only records the operations
-  that succeeded is an audit trail of the wrong thing."
+  that succeeded is an audit trail of the wrong thing.
+
+  `:escalate` exists for the third of those. It is not a terminal node and it
+  decides nothing; it sits between `:decide` and the interrupt so that a claim
+  waiting on a human signature is a claim the ledger has heard of. Without it,
+  `awaiting approval` and `never submitted` were the same observation — both
+  produced zero ledger entries — and any surface reading the ledger had to
+  report an escalated claim as unknown. The interrupt is `interrupt-before
+  :request-approval`, so resuming restarts at `:request-approval` and this node
+  appends exactly once, at the moment the run stops.
+
+  Every ledger fact carries `:claim-id` and `:employee-id` at the top level, on
+  all three dispositions. Nesting the identity inside `:record` would have made
+  a committed claim findable and a held one not — the held claim being the one
+  somebody needs to look up."
   (:require [langgraph.graph :as g]
             [langgraph.checkpoint :as cp]
             [keihi.advisor :as advisor]
             [keihi.governor :as governor]
             [keihi.store :as store]))
+
+(defn- identify
+  "Stamp a ledger fact with the identity of the claim it is about.
+
+  Applied to every disposition through one function rather than three literal
+  maps, so a fourth disposition cannot be added without an identity — the way
+  `:hold` originally shipped without one."
+  [request fact]
+  (assoc fact
+         :claim-id (:claim-id request)
+         :employee-id (:employee-id request)))
 
 (defn build-graph
   "Build a compiled KeihiActor graph. `store` implements `keihi.store/Store`.
@@ -61,10 +86,18 @@
                                     (:hard? verdict) :hold
                                     (:escalate? verdict) :request-approval
                                     :else :commit)}))
+      (g/add-node :escalate
+                  (fn [{:keys [request verdict]}]
+                    (store/append-ledger! store
+                                          (identify request
+                                                    {:disposition :request-approval
+                                                     :verdict verdict}))
+                    {:audit [{:node :escalate :verdict verdict}]}))
       (g/add-node :request-approval (fn [s] s))
       (g/add-node :commit
                   (fn [{:keys [request proposal verdict]}]
-                    (let [record {:employee-id (:employee-id request)
+                    (let [record {:claim-id (:claim-id request)
+                                  :employee-id (:employee-id request)
                                   :op (:op proposal)
                                   :receipt (:receipt proposal)
                                   :amount (:amount proposal)
@@ -73,15 +106,18 @@
                       ;; the ledger carries the verdict, not just the record:
                       ;; `what was paid` without `what was checked` cannot be
                       ;; audited after the fact.
-                      (store/append-ledger! store {:disposition :commit
-                                                   :record record
-                                                   :verdict verdict})
+                      (store/append-ledger! store
+                                            (identify request
+                                                      {:disposition :commit
+                                                       :record record
+                                                       :verdict verdict}))
                       {:record record
                        :audit [{:node :commit :record record}]})))
       (g/add-node :hold
-                  (fn [{:keys [verdict]}]
-                    (store/append-ledger! store {:disposition :hold
-                                                 :verdict verdict})
+                  (fn [{:keys [request verdict]}]
+                    (store/append-ledger! store
+                                          (identify request {:disposition :hold
+                                                             :verdict verdict}))
                     {:audit [{:node :hold :verdict verdict}]}))
       (g/set-entry-point :intake)
       (g/add-edge :intake :advise)
@@ -92,8 +128,9 @@
        (fn [{:keys [disposition]}]
          (case disposition
            :commit :commit
-           :request-approval :request-approval
+           :request-approval :escalate
            :hold)))
+      (g/add-edge :escalate :request-approval)
       (g/add-edge :request-approval :commit)
       (g/set-finish-point :commit)
       (g/set-finish-point :hold)

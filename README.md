@@ -18,8 +18,10 @@ Two capability libraries do the work this repo does not:
 the verdict, and [`kotoba-lang/taxlaw`](https://github.com/kotoba-lang/taxlaw)
 answers what a tax record must carry. Neither is vendored.
 
-**46 tests / 175 assertions green**, measured 2026-08-17 from a directory
-with no sibling checkouts (see *Forkable for real*, below).
+**87 tests / 353 assertions green**, measured 2026-08-17 from a fresh
+`git clone` into `/tmp` with no sibling checkouts (see *Forkable for real*,
+below). Two store backends answer identically under one contract test, and
+three HTTP routes are the whole network surface.
 
 ## Ten HARD invariants (never approvable past)
 
@@ -117,28 +119,143 @@ distinction these libraries exist to preserve.
 `:tax` is `nil` — not an empty assessment — when there was nothing to assess,
 so the actor never manufactures a finding to have one.
 
+## Two store backends, and a contract test that would notice a disagreement
+
+`keihi.store/Store` has two implementations:
+
+| | `MemStore` | `DatomicStore` |
+|---|---|---|
+| substrate | one atom | `langchain.db` (Datomic-API EAV, DataScript in-process) |
+| survives the process | no | whatever `langchain.db`'s `:db-api` is bound to |
+| streams | `conj` onto a vector | seq-keyed EDN blobs via `kotoba-lang/langchain-store` |
+
+The EDN-blob codec, the identity schema and the seq-keyed stream helpers come
+from [`kotoba-lang/langchain-store`](https://github.com/kotoba-lang/langchain-store),
+which exists because 190 store files in this fleet had hand-rolled the same
+two-liner. It is not re-hand-rolled here.
+
+**`datomic-store` is honest about what it is.** With the default in-process
+DataScript it survives no longer than `MemStore` does; what it buys
+unconditionally is that pointing keihi at a real Datomic or a kotoba-server pod
+is a `:db-api` swap and not a rewrite. Claiming durability the function cannot
+observe would be exactly the fabrication the governor spends ten rules refusing.
+
+`keihi.store-contract-test` runs **every** assertion against **both**, because a
+second backend that quietly disagrees with the first is worse than no second
+backend: the disagreement only appears on the deployment that has the durable
+one. Two properties are load-bearing:
+
+* **the ledger is ordered and append-only.** It is the only record of what this
+  actor refused and why, and the actor never reads it back — so a backend that
+  returned it out of order would produce an audit trail in which the amendment
+  precedes the claim and nothing would complain.
+* **`:origin`, `:preservation` and `:registration-number` survive the round
+  trip.** Those three fields are what 電子帳簿保存法 第七条, 消費税法 第三十条第七項
+  and the 登録番号 rule actually turn on. A backend that dropped one would turn a
+  HARD hold into a clean commit, silently, on the durable deployment only.
+
+Both are demonstrated rather than asserted — mutations 21, 22 and 23 below
+break exactly one backend each, and the contract test catches all three while
+every single-backend suite stays green.
+
+## The HTTP surface: three routes
+
+```text
+POST /api/claim        submit an expense claim
+GET  /api/claim/:id    the whole life of one claim, and its verdict
+GET  /api/ledger       the caller's own slice of the append-only ledger
+```
+
+Portable `.cljc` request→response functions in `keihi.edge.endpoints`: a
+response is `{:status n :body {...}}`, there are no host effects and no
+framework, and the caller's DID arrives already verified (CACAO is
+`kotoba-lang/org-chainagnostic-cacao`'s job). There is no Cloudflare binding in
+this repo yet, and shipping an untested one would be worse than saying so.
+
+Of the four ops only `:submit-claim` is exposed. `:disburse` always escalates,
+`:amend-claim` rewrites a submitted figure and `:reject-claim` is a decision
+about someone's money — none of them belongs on a network path.
+`submit-claim-core!` hard-codes the op and takes the employee from the DID, so a
+body naming `:disburse` or another employee gets a claim submitted under the
+caller's own name.
+
+**Three outcomes, three statuses, no `:ok` boolean.** A claim can commit,
+escalate or hold; a boolean has two values. So `:disposition` is on the body and
+the status matches it — 200 / **202** / 409. 202 for an escalation because
+`awaiting a human signature` is neither `paid` nor `refused`, and calling it
+either is a lie in one direction or the other. `:ok` survives only on responses
+about the *request* (503 / 403 / 400 / 404 / 405), where nothing three-valued is
+being reported.
+
+**Every claim response carries `:tax`.** The same three-valued coverage report
+the verdict holds, reduced to one keyword per statute — `:checked`,
+`:none`, `:not-declared`, `:not-claimed`, `:not-assessed`. A 200 that omitted it
+would render *we read 消費税法 and this claim satisfies it* and *nobody has read
+the law where this employee works* as the same green tick.
+
+**An unknown claim is 404, never an empty 200** — `no entries` and `no such
+claim` are the same bytes if the answer is a list, and only one of them means
+the actor knows anything. A claim belonging to another employee returns the
+byte-identical 404, deliberately: a 403 there would confirm the claim exists and
+make a claim id something a stranger can probe for.
+
+An absent allow-list serves **503** on all three routes, and an unset
+`KEIHI_STORE` serves 503 too — refusing beats returning `:no-employee` and
+blaming the caller for a storeless deployment.
+
+The **whole** ledger has no HTTP representation. It is every employee's
+spending, and an actor that hands that to whoever holds one valid DID has
+published the company's books. `:scope :caller-only` is on the body so nobody
+mistakes the slice for the whole.
+
+### One change to the actor came out of this
+
+The graph now runs `:decide → :escalate → :request-approval`, and `:escalate`
+appends to the ledger before the interrupt. Previously an escalated claim
+produced **zero** ledger entries until a human resumed the thread, so *awaiting
+approval* and *never submitted* were the same observation and no read surface
+could tell them apart. Every ledger fact also carries `:claim-id` and
+`:employee-id` at the top level on all three dispositions — nesting the identity
+inside `:record` made a committed claim findable and a held one not, the held
+claim being the one somebody needs to look up.
+
 ## Forkable for real: zero `:local/root`
 
-`deps.edn` declares three git deps and no sibling paths. That is a hard
+`deps.edn` declares four git deps and no sibling paths. That is a hard
 property, not a preference: a `:local/root` makes this repo unforkable (the
 line below would be false) and structurally ungateable on the murakumo fleet,
 which ships **one repo's tree and no siblings** — a gate would fail on a
 missing directory and read as a broken build rather than a broken dependency.
 
-Grepping `deps.edn` does not prove it, because a transitive `:local/root` is
-just as fatal and does not appear there. So the suite was run from `/tmp/keihi`,
-where no checkout of `governor`, `taxlaw` or `langgraph` exists:
+Grepping does not prove it, twice over. A transitive `:local/root` in a
+dependency is just as fatal and does not appear here; and
+`langchain-store`'s `deps.edn` contains the literal string `:local/root` inside
+a *comment* explaining that it used to have one, so a grep of that file reports
+a hit that is not there. It was checked by **parsing** each `deps.edn` as EDN
+and walking `:deps` plus every alias's `:extra-deps` / `:replace-deps` /
+`:override-deps`:
 
 ```
-$ cd /tmp/keihi && clojure -M:test
-Ran 46 tests containing 175 assertions.
+langchain-store @ b986669f   5 coordinates, 0 :local/root
+langchain-clj   @ 51e7b61e   6 coordinates, 0 :local/root
+keihi (this repo)            6 coordinates, 0 :local/root
+```
+
+And then the only check that actually settles it — the suite run from a fresh
+`git clone` into `/tmp`, where no checkout of `governor`, `taxlaw`, `langgraph`
+or `langchain-store` exists:
+
+```
+$ git clone https://github.com/cloud-itonami/keihi.git /tmp/keihi && cd /tmp/keihi
+$ clojure -M:test
+Ran 87 tests containing 353 assertions.
 0 failures, 0 errors.
 ```
 
 ## Proving the tests can fail
 
 A suite that stays green when you break the thing it tests is worthless, and
-the only way to tell the two apart is to break it. **All 20 mutations below
+the only way to tell the two apart is to break it. **All 33 mutations below
 were applied one at a time to a clean tree and the suite re-run; every one of
 them reddened at least one test, and none survived.**
 
@@ -164,6 +281,37 @@ them reddened at least one test, and none survived.**
 | 18 | reproduce the fleet's measured drift | 3 — `every-verdict-is-well-formed`, `the-drift-that-happened-elsewhere-cannot-happen-here`, `escalation-carries-a-reason` |
 | 19 | enforce 消費税法 where it was never read | 1 — `the-article-30-rule-only-fires-where-the-statute-was-read` |
 | 20 | assess the ops that act on a settled claim | 1 — `a-rejection-is-not-blocked-by-the-claim-it-rejects` |
+| 21 | **`DatomicStore` only**: `next-seq` always returns 0 | 6 — `the-ledger-is-append-only-and-ordered`, `identical-ledger-facts-both-land…`, `records-append-in-order…`, `claim-history-is-the-whole-life…`, `ledger-of-scopes-to-one-employee`, `a-disbursement-escalates-then-commits…` |
+| 22 | **`MemStore` only**: the ledger prepends instead of appending | 4 — `the-ledger-is-append-only-and-ordered`, `claim-history-is-the-whole-life…`, `a-disbursement-escalates-then-commits…`, `the-ledger-route-serves-the-callers-own-slice-only` |
+| 23 | **`DatomicStore` only**: `register-receipt!` drops `:preservation` | 2 — `the-three-statute-bearing-receipt-fields-survive-the-round-trip`, `a-receipt-that-declares-nothing-round-trips-as-declaring-nothing` |
+| 24 | `:escalate` stops appending to the ledger | 3 — `a-disbursement-escalates-then-commits…`, `an-asserted-proviso-is-202-and-pays-nothing`, `a-claims-history-reads-back-in-order-with-its-verdict` |
+| 25 | ledger facts lose `:claim-id` | 9 — every contract-suite actor test and every edge read test |
+| 26 | let the body choose the `:op` | 1 — `the-body-cannot-choose-the-op-and-so-cannot-reach-the-money` |
+| 27 | let the body choose the employee | 1 — `the-employee-comes-from-the-did-not-the-body` |
+| 28 | an unknown claim returns 200 with an empty history | 2 — `an-unknown-claim-is-404-and-never-an-empty-200`, `another-employees-claim-is-indistinguishable…` |
+| 29 | `tax-coverage` reports `:checked` for everything | 2 — `an-unchecked-jurisdiction-reports-none-and-not-silence`, `not-claimed-not-assessed-and-checked-are-three-different-answers` |
+| 30 | drop the caller scoping on `GET /api/claim/:id` | 1 — `another-employees-claim-is-indistinguishable…` |
+| 31 | an absent allow-list serves the endpoint anyway | 1 — `an-absent-allowlist-serves-503-on-every-route` (3 assertions) |
+| 32 | an escalation answers 200 instead of 202 | 1 — `an-asserted-proviso-is-202-and-pays-nothing` |
+| 33 | the router builds its own store per request | 2 — `the-router-carries-reads-across-requests-on-the-durable-backend`, `the-router-serves-three-routes-and-refuses-the-rest` |
+
+**Mutations 21, 22 and 23 are the ones the contract test exists for.** Each
+breaks exactly ONE backend.
+
+Under **21** and **23** — both `DatomicStore`-only — every other suite stays
+green: `actor-test` (7), `governor-test` (14), `tax-rules-test` (20),
+`conformance-test` (5) and all 26 edge tests, 72 tests in total, because none of
+them ever constructs the durable backend. Only the file that runs both
+implementations notices, and it reddens 6 tests and 2 tests respectively. That
+is the entire argument for a second backend having a contract test rather than
+a smoke test.
+
+Under **22** — `MemStore`-only — the contract suite catches it (3 tests) and one
+edge test catches it too, because the edge happens to exercise MemStore. The
+asymmetry is the point: the backend the rest of the suite uses gets incidental
+coverage, and the one it does not use gets none at all unless something is
+written for it. Before this file existed, mutations 21 and 23 would have
+shipped green.
 
 Every mutation also reddens `every-named-hard-case-actually-raises-the-rule-it-is-named-for`
 or `the-case-set-actually-covers-the-three-dispositions` where the disposition
@@ -198,9 +346,18 @@ other floor.
 ## Running it
 
 ```bash
-clojure -M:test     # 46 tests, 175 assertions
-clojure -M:lint     # clj-kondo
+clojure -M:test     # 87 tests, 353 assertions
+clojure -M:lint     # clj-kondo, 0 errors 0 warnings
 ```
+
+| suite | tests | what it holds |
+|---|---|---|
+| `keihi.governor-test` | 14 | provenance, actuation, receipt basis, ownership, arithmetic |
+| `keihi.tax-rules-test` | 20 | the four statute-driven rules and their three-valued wiring |
+| `keihi.actor-test` | 7 | the graph obeys the verdict |
+| `keihi.conformance-test` | 5 | every verdict is internally consistent |
+| `keihi.store-contract-test` | 15 | `MemStore` ≡ `DatomicStore` |
+| `keihi.edge.endpoints-test` | 26 | the three routes, and what they refuse |
 
 AGPL-3.0-or-later, forkable by any qualified operator. Part of the
 [cloud-itonami](https://itonami.cloud) open business fleet.
