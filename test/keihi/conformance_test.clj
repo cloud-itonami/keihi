@@ -13,7 +13,7 @@
   internally consistent, across the whole space of dispositions this actor
   has, and that the space is actually covered."
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [keihi.store :as store]
             [keihi.governor :as governor]
             [governor.core :as gov]))

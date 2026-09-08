@@ -28,7 +28,7 @@
   not get dropped — it returns `:no-mapping`. A journal entry missing one
   line balances by having lost it, which is the failure this plane already
   caught once at the projection layer."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 (defn- positive-amount? [x] (and (number? x) (pos? x)))
 
