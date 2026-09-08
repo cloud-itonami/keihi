@@ -27,7 +27,7 @@
   written: one says *I wrote this*, the other says *this was already there*.
   Folding them would make a reconciliation unable to distinguish a carrier
   that retried from one that double-submitted work nobody had confirmed."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 (def outcomes
   "Every outcome this namespace will name. `:unknown-response` is one of
