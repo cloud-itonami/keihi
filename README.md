@@ -22,7 +22,7 @@ answers what a tax record must carry. Neither is vendored.
 `git clone` into `/tmp` with no sibling checkouts (see *Forkable for real*,
 below). Two store backends answer identically under one contract test, and
 three HTTP routes are the whole network surface. **59 mutations, 59 killed**
-— `nbb tools/mutate.cljs`, no longer a table typed by hand.
+— `nbb tools/mutate.cljk`, no longer a table typed by hand.
 
 ## Eleven HARD invariants (never approvable past)
 
@@ -333,9 +333,9 @@ the only way to tell the two apart is to break it.
 ### The harness
 
 ```bash
-nbb tools/check-mutations.cljs   # every :find occurs exactly once — run this first
-nbb tools/mutate.cljs            # the whole table
-nbb tools/mutate.cljs :no-receipt  # one, by id
+nbb tools/check-mutations.cljk   # every :find occurs exactly once — run this first
+nbb tools/mutate.cljk            # the whole table
+nbb tools/mutate.cljk :no-receipt  # one, by id
 ```
 
 `tools/mutations.edn` holds **59 mutations**; measured 2026-08-18, **59 killed,

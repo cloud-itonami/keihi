@@ -118,7 +118,7 @@
 (deftest this-namespace-reaches-nothing
   (testing "carrying the request is not this actor's job; recording what came
             back is"
-    (let [src (slurp "src/keihi/handoff.cljc")]
+    (let [src (slurp "src/keihi/handoff.cljk")]
       (is (> (count src) 500) "evidence floor: an empty read would pass every check below")
       (doseq [tok ["http" "fetch" "slurp" "4311" "client/" "js/"]]
         (is (not (re-find (re-pattern (str "\\(" tok)) src))
