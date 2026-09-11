@@ -78,7 +78,7 @@
 (deftest this-namespace-reaches-nothing
   (testing "it produces a value; reaching across to write into another
             actor's ledger would be the actuation this repo refuses"
-    (let [src (slurp "src/keihi/shiwake.cljc")]
+    (let [src (slurp "src/keihi/shiwake.cljk")]
       (doseq [tok ["http" "fetch" "slurp" "4311" "client/" "js/"]]
         (is (not (re-find (re-pattern (str "\\(" tok)) src))
             (str "shiwake must not call out: found " tok))))))
