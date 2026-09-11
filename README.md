@@ -22,7 +22,7 @@ answers what a tax record must carry. Neither is vendored.
 `git clone` into `/tmp` with no sibling checkouts (see *Forkable for real*,
 below). Two store backends answer identically under one contract test, and
 three HTTP routes are the whole network surface. **59 mutations, 59 killed**
-— `nbb tools/mutate.cljk`, no longer a table typed by hand.
+— `kbb --backend sci tools/mutate.cljk`, no longer a table typed by hand.
 
 ## Eleven HARD invariants (never approvable past)
 
@@ -320,7 +320,7 @@ or `langchain-store` exists:
 
 ```
 $ git clone https://github.com/cloud-itonami/keihi.git /tmp/keihi && cd /tmp/keihi
-$ clojure -M:test
+$ kbb -M:test
 Ran 137 tests containing 570 assertions.
 0 failures, 0 errors.
 ```
@@ -333,14 +333,14 @@ the only way to tell the two apart is to break it.
 ### The harness
 
 ```bash
-nbb tools/check-mutations.cljk   # every :find occurs exactly once — run this first
-nbb tools/mutate.cljk            # the whole table
-nbb tools/mutate.cljk :no-receipt  # one, by id
+kbb --backend sci tools/check-mutations.cljk   # every :find occurs exactly once — run this first
+kbb --backend sci tools/mutate.cljk            # the whole table
+kbb --backend sci tools/mutate.cljk :no-receipt  # one, by id
 ```
 
 `tools/mutations.edn` holds **59 mutations**; measured 2026-08-18, **59 killed,
 0 survived, 0 unmeasured**. Each applies one single-token change to one file
-under `src/keihi/`, runs `clojure -M:test`, records which tests reddened, and
+under `src/keihi/`, runs `kbb -M:test`, records which tests reddened, and
 restores the file. A mutation that reddens nothing is reported as a SURVIVOR,
 which is a finding about the suite rather than about the mutation; one that
 stops the file READING is reported UNMEASURED and scores as neither.
@@ -468,8 +468,8 @@ other floor.
 ## Running it
 
 ```bash
-clojure -M:test     # 87 tests, 353 assertions
-clojure -M:lint     # clj-kondo, 0 errors 0 warnings
+kbb -M:test     # 87 tests, 353 assertions
+kbb -M:lint     # clj-kondo, 0 errors 0 warnings
 ```
 
 | suite | tests | what it holds |

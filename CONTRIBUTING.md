@@ -12,7 +12,7 @@ AGPL-3.0-or-later. Two conditions on anything that changes a rule:
    strength of a URL nobody opened is not a cited rule, and this repo marks
    the difference (`:rule/review`, `keihi.shohizei/provision`).
 
-2. **Show the test failing.** Break the implementation, run `clojure -M:test`,
+2. **Show the test failing.** Break the implementation, run `kbb -M:test`,
    and put the reddened test names in the PR. A test that stays green when you
    break the thing it tests is worthless; the README's mutation table is what
    that evidence looks like here. Check that what you broke and what went red
