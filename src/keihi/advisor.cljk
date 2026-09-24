@@ -26,7 +26,7 @@
   confidence — which forces the governor to escalate or hold. Note that the
   governor treats an ABSENT `:confidence` as 0.0 for the same reason: a
   proposal that has not said how confident it is has not said it is confident."
-  (:require #?(:clj  [clojure.edn :as edn]
+  (:require #?(:clj  [kotoba.lang.edn :as edn]
                :cljs [cljs.reader :as edn])))
 
 (defprotocol Advisor
