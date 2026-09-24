@@ -8,7 +8,7 @@
   wiring: that this actor asks about the right jurisdiction, that it splits a
   three-valued answer into distinct dispositions instead of collapsing it to a
   boolean, and that what could not be checked survives onto the verdict."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [keihi.store :as store]
             [keihi.shohizei :as shohizei]
             [keihi.governor :as governor]))

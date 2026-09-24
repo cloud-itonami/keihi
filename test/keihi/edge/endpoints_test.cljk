@@ -7,7 +7,7 @@
   supposed to answer, does not let the body choose who is claiming or what
   operation is being performed, and does not report `nobody looked` and `we
   looked and it was fine` with the same body."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [keihi.store :as store]
             [keihi.edge.endpoints :as edge]))
 

@@ -17,7 +17,7 @@
   3. **What it cannot check, it says.** Not by omission: by a named limit on
      the verdict, because a `:checked` with nothing beside it reads as
      `valid` and a `:none` with nothing beside it reads as nothing at all."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [keihi.store :as store]
             [keihi.governor :as governor]
             [keihi.edge.endpoints :as edge]

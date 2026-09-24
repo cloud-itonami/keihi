@@ -5,7 +5,7 @@
   namespace existed, the facts existed, and no path produced one. These
   tests are about the ROUTE, for the same reason the posting tests in the
   ledger actor are phrased about its actor rather than its projection."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [keihi.store :as store]
             [keihi.edge.endpoints :as e]))
 

@@ -1,7 +1,7 @@
 (ns keihi.shiwake-test
   "An approved claim becoming a journal entry — and every way that hand-off
   can quietly lose one."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [keihi.shiwake :as shiwake]))
 
 (def ^:private mapping

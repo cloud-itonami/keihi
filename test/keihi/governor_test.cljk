@@ -3,7 +3,7 @@
   arithmetic, and the two escalations that are not about tax.
 
   The statute-driven rules have their own suite in `keihi.tax-rules-test`."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [keihi.store :as store]
             [keihi.governor :as governor]))
 
