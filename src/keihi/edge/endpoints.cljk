@@ -60,7 +60,7 @@
   (:require [keihi.actor :as actor]
             [keihi.store :as store]
             [keihi.handoff :as handoff]
-            #?(:clj [clojure.edn :as edn] :cljs [cljs.reader :as edn])))
+            #?(:clj [kotoba.lang.edn :as edn] :cljs [cljs.reader :as edn])))
 
 ;; ---------------------------------------------------------------------------
 ;; Allow-list
