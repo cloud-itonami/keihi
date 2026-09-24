@@ -18,7 +18,7 @@
   第七条, 消費税法 第三十条第七項 and the 登録番号 rule actually turn on. A backend
   that dropped one of them would turn a HARD hold into a clean commit, silently,
   and only on the durable deployment."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [keihi.store :as store]
             [keihi.actor :as actor]))
 

@@ -3,7 +3,7 @@
   verdict says; these prove that the graph obeys it — that a hold writes no
   record and moves no money, and that an escalation stops before the commit
   node rather than after it."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [keihi.actor :as actor]
             [keihi.advisor :as advisor]
             [keihi.store :as store]))

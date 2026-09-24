@@ -1,7 +1,7 @@
 (ns keihi.handoff-test
   "Converted is not posted. These tests are about the four ways a hand-off
   record can fail to say what happened."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [keihi.handoff :as handoff]))
 
 (def ^:private claim {:claim-id "cl-1" :receipt "r-1"})
