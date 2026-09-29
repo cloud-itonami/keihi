@@ -3,7 +3,7 @@
   protocol injected into the `keihi.actor` StateGraph; `MemStore` is the
   default, deterministic, zero-dep backend, and a Datomic / kotobase-backed
   implementation can be swapped in without touching the actor or the governor
-  (itonami actor pattern, ADR-2607011000 / CLAUDE.md Actors section). Modeled
+  (itonami actor pattern, ADR-2607011000 / AGENTS.md Actors section). Modeled
   on `cloud-itonami-isco-4311`'s bookkeeping.store, with the source-document
   registry specialised to 領収書/請求書.
 

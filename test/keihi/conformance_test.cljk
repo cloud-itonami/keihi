@@ -174,7 +174,7 @@
 (deftest the-case-set-actually-covers-the-three-dispositions
   ;; Evidence floor. A conformance suite whose cases all landed in one
   ;; disposition would pass while checking almost nothing — the failure mode
-  ;; CLAUDE.md records as "measured nothing and reported clean".
+  ;; AGENTS.md records as "measured nothing and reported clean".
   (let [vs (map verdict-for cases)]
     (is (>= (count (filter :ok? vs)) 2) "no clean case")
     (is (>= (count (filter :hard? vs)) 12) "HARD rules under-covered")
