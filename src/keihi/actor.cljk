@@ -1,6 +1,6 @@
 (ns keihi.actor
   "KeihiActor — 経費精算 as a `langgraph.graph/state-graph` (ADR-2607011000 /
-  CLAUDE.md Actors section). One graph run = one expense-claim request
+  AGENTS.md Actors section). One graph run = one expense-claim request
   (intake → advise → govern → decide → commit / hold), with a human-approval
   interrupt for escalated proposals. No infinite internal loop; checkpointed
   per superstep, so an interrupted run resumes after sign-off.

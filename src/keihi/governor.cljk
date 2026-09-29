@@ -4,7 +4,7 @@
   `:advise`. The KeihiAdvisor has no notion of employee provenance, receipt
   ownership, claim arithmetic or 消費税法, so this MUST be a separate system
   able to reject a proposal (itonami actor pattern, ADR-2607011000 /
-  CLAUDE.md Actors section). Modeled on `cloud-itonami-isco-4311`'s
+  AGENTS.md Actors section). Modeled on `cloud-itonami-isco-4311`'s
   bookkeeping.governor.
 
   HARD invariants (`:hard?` true, ALWAYS `:hold`, never approvable past):
